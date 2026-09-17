@@ -31,6 +31,7 @@ message AgentMessage {
     Hello hello = 1;
     Heartbeat heartbeat = 2;
     JobEvent event = 3;
+    Pong pong = 4;
   }
 }
 
@@ -43,6 +44,9 @@ message BackendMessage {
     // the wire shape is settled; no stage-1 code sends or handles them.
     Assignment assignment = 4;
     Ack ack = 5;
+    // Ping measures the backend<->agent round trip; the agent echoes the nonce
+    // in a Pong immediately.
+    Ping ping = 6;
   }
 }
 
@@ -121,6 +125,16 @@ message Monitor {
 // so an agent buffering results while disconnected can discard up to it.
 message Ack {
   uint64 seq = 1;
+}
+
+// Ping / Pong measure the round-trip latency of the stream. The backend sends
+// a Ping with an opaque nonce; the agent echoes it in a Pong at once.
+message Ping {
+  uint64 nonce = 1;
+}
+
+message Pong {
+  uint64 nonce = 1;
 }
 
 enum Protocol {

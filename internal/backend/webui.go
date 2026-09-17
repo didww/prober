@@ -2,9 +2,12 @@ package backend
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
 	"io/fs"
 	"net/http"
 	"path"
+	"regexp"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -16,7 +19,7 @@ import (
 // embedded Vue SPA at everything else, all mounted under base_path.
 func (s *Server) httpHandler() http.Handler {
 	app := chi.NewRouter()
-	app.Use(securityHeaders)
+	app.Use(securityHeaders(contentSecurityPolicy()))
 	app.Mount("/api", s.api.Routes())
 	app.Get("/healthz", func(w http.ResponseWriter, req *http.Request) {
 		w.Write([]byte(`{"status":"ok"}`))
@@ -33,20 +36,52 @@ func (s *Server) httpHandler() http.Handler {
 	return root
 }
 
-func securityHeaders(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h := w.Header()
-		h.Set("X-Content-Type-Options", "nosniff")
-		h.Set("X-Frame-Options", "DENY")
-		h.Set("Referrer-Policy", "no-referrer")
-		// Everything is served from this origin: the SPA is embedded, no CDN.
-		// Vue attaches component styles at runtime, hence unsafe-inline for
-		// styles only; script-src stays strict.
-		h.Set("Content-Security-Policy",
-			"default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "+
-				"connect-src 'self'; frame-ancestors 'none'; base-uri 'self'")
-		next.ServeHTTP(w, r)
-	})
+func securityHeaders(csp string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			h := w.Header()
+			h.Set("X-Content-Type-Options", "nosniff")
+			h.Set("X-Frame-Options", "DENY")
+			h.Set("Referrer-Policy", "no-referrer")
+			h.Set("Content-Security-Policy", csp)
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+var scriptTagRe = regexp.MustCompile(`(?is)<script([^>]*)>(.*?)</script>`)
+
+// contentSecurityPolicy builds the CSP. script-src is 'self' plus a sha256 hash
+// of each inline script in index.html (the pre-paint theme stamp), so inline
+// scripts run without opening the policy to 'unsafe-inline'. Everything else is
+// served from this origin; Vue attaches component styles at runtime, hence
+// unsafe-inline for styles only.
+func contentSecurityPolicy() string {
+	scriptSrc := "'self'"
+	if dist, err := web.Dist(); err == nil {
+		if b, err := fs.ReadFile(dist, "index.html"); err == nil {
+			for _, hash := range inlineScriptHashes(b) {
+				scriptSrc += " '" + hash + "'"
+			}
+		}
+	}
+	return "default-src 'self'; script-src " + scriptSrc + "; " +
+		"style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; " +
+		"frame-ancestors 'none'; base-uri 'self'"
+}
+
+// inlineScriptHashes returns the CSP hash of every <script> in html that has no
+// src attribute, matching what the browser computes over the tag's contents.
+func inlineScriptHashes(html []byte) []string {
+	var out []string
+	for _, m := range scriptTagRe.FindAllSubmatch(html, -1) {
+		if bytes.Contains(m[1], []byte("src=")) {
+			continue // an external script, allowed by 'self'
+		}
+		sum := sha256.Sum256(m[2])
+		out = append(out, "sha256-"+base64.StdEncoding.EncodeToString(sum[:]))
+	}
+	return out
 }
 
 // spaHandler serves the built SPA out of the embedded FS, with history fallback

@@ -234,7 +234,7 @@ func (x JobFinished_Reason) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use JobFinished_Reason.Descriptor instead.
 func (JobFinished_Reason) EnumDescriptor() ([]byte, []int) {
-	return file_prober_v1_agent_proto_rawDescGZIP(), []int{18, 0}
+	return file_prober_v1_agent_proto_rawDescGZIP(), []int{20, 0}
 }
 
 type JobError_Code int32
@@ -289,7 +289,7 @@ func (x JobError_Code) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use JobError_Code.Descriptor instead.
 func (JobError_Code) EnumDescriptor() ([]byte, []int) {
-	return file_prober_v1_agent_proto_rawDescGZIP(), []int{19, 0}
+	return file_prober_v1_agent_proto_rawDescGZIP(), []int{21, 0}
 }
 
 type AgentMessage struct {
@@ -299,6 +299,7 @@ type AgentMessage struct {
 	//	*AgentMessage_Hello
 	//	*AgentMessage_Heartbeat
 	//	*AgentMessage_Event
+	//	*AgentMessage_Pong
 	Msg           isAgentMessage_Msg `protobuf_oneof:"msg"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -368,6 +369,15 @@ func (x *AgentMessage) GetEvent() *JobEvent {
 	return nil
 }
 
+func (x *AgentMessage) GetPong() *Pong {
+	if x != nil {
+		if x, ok := x.Msg.(*AgentMessage_Pong); ok {
+			return x.Pong
+		}
+	}
+	return nil
+}
+
 type isAgentMessage_Msg interface {
 	isAgentMessage_Msg()
 }
@@ -384,11 +394,17 @@ type AgentMessage_Event struct {
 	Event *JobEvent `protobuf:"bytes,3,opt,name=event,proto3,oneof"`
 }
 
+type AgentMessage_Pong struct {
+	Pong *Pong `protobuf:"bytes,4,opt,name=pong,proto3,oneof"`
+}
+
 func (*AgentMessage_Hello) isAgentMessage_Msg() {}
 
 func (*AgentMessage_Heartbeat) isAgentMessage_Msg() {}
 
 func (*AgentMessage_Event) isAgentMessage_Msg() {}
+
+func (*AgentMessage_Pong) isAgentMessage_Msg() {}
 
 type BackendMessage struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -399,6 +415,7 @@ type BackendMessage struct {
 	//	*BackendMessage_Cancel
 	//	*BackendMessage_Assignment
 	//	*BackendMessage_Ack
+	//	*BackendMessage_Ping
 	Msg           isBackendMessage_Msg `protobuf_oneof:"msg"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -486,6 +503,15 @@ func (x *BackendMessage) GetAck() *Ack {
 	return nil
 }
 
+func (x *BackendMessage) GetPing() *Ping {
+	if x != nil {
+		if x, ok := x.Msg.(*BackendMessage_Ping); ok {
+			return x.Ping
+		}
+	}
+	return nil
+}
+
 type isBackendMessage_Msg interface {
 	isBackendMessage_Msg()
 }
@@ -512,6 +538,12 @@ type BackendMessage_Ack struct {
 	Ack *Ack `protobuf:"bytes,5,opt,name=ack,proto3,oneof"`
 }
 
+type BackendMessage_Ping struct {
+	// Ping measures the backend<->agent round trip; the agent echoes the nonce
+	// in a Pong immediately.
+	Ping *Ping `protobuf:"bytes,6,opt,name=ping,proto3,oneof"`
+}
+
 func (*BackendMessage_Welcome) isBackendMessage_Msg() {}
 
 func (*BackendMessage_Start) isBackendMessage_Msg() {}
@@ -521,6 +553,8 @@ func (*BackendMessage_Cancel) isBackendMessage_Msg() {}
 func (*BackendMessage_Assignment) isBackendMessage_Msg() {}
 
 func (*BackendMessage_Ack) isBackendMessage_Msg() {}
+
+func (*BackendMessage_Ping) isBackendMessage_Msg() {}
 
 // Hello is the first message on a stream.
 type Hello struct {
@@ -1186,6 +1220,96 @@ func (x *Ack) GetSeq() uint64 {
 	return 0
 }
 
+// Ping / Pong measure the round-trip latency of the stream. The backend sends
+// a Ping with an opaque nonce; the agent echoes it in a Pong at once.
+type Ping struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Nonce         uint64                 `protobuf:"varint,1,opt,name=nonce,proto3" json:"nonce,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Ping) Reset() {
+	*x = Ping{}
+	mi := &file_prober_v1_agent_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Ping) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Ping) ProtoMessage() {}
+
+func (x *Ping) ProtoReflect() protoreflect.Message {
+	mi := &file_prober_v1_agent_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Ping.ProtoReflect.Descriptor instead.
+func (*Ping) Descriptor() ([]byte, []int) {
+	return file_prober_v1_agent_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *Ping) GetNonce() uint64 {
+	if x != nil {
+		return x.Nonce
+	}
+	return 0
+}
+
+type Pong struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Nonce         uint64                 `protobuf:"varint,1,opt,name=nonce,proto3" json:"nonce,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Pong) Reset() {
+	*x = Pong{}
+	mi := &file_prober_v1_agent_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Pong) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Pong) ProtoMessage() {}
+
+func (x *Pong) ProtoReflect() protoreflect.Message {
+	mi := &file_prober_v1_agent_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Pong.ProtoReflect.Descriptor instead.
+func (*Pong) Descriptor() ([]byte, []int) {
+	return file_prober_v1_agent_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *Pong) GetNonce() uint64 {
+	if x != nil {
+		return x.Nonce
+	}
+	return 0
+}
+
 // TraceSpec is one trace as the user asked for it. Zero values mean "agent
 // default" for every numeric field.
 type TraceSpec struct {
@@ -1217,7 +1341,7 @@ type TraceSpec struct {
 
 func (x *TraceSpec) Reset() {
 	*x = TraceSpec{}
-	mi := &file_prober_v1_agent_proto_msgTypes[12]
+	mi := &file_prober_v1_agent_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1229,7 +1353,7 @@ func (x *TraceSpec) String() string {
 func (*TraceSpec) ProtoMessage() {}
 
 func (x *TraceSpec) ProtoReflect() protoreflect.Message {
-	mi := &file_prober_v1_agent_proto_msgTypes[12]
+	mi := &file_prober_v1_agent_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1242,7 +1366,7 @@ func (x *TraceSpec) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TraceSpec.ProtoReflect.Descriptor instead.
 func (*TraceSpec) Descriptor() ([]byte, []int) {
-	return file_prober_v1_agent_proto_rawDescGZIP(), []int{12}
+	return file_prober_v1_agent_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *TraceSpec) GetTarget() string {
@@ -1364,7 +1488,7 @@ type JobEvent struct {
 
 func (x *JobEvent) Reset() {
 	*x = JobEvent{}
-	mi := &file_prober_v1_agent_proto_msgTypes[13]
+	mi := &file_prober_v1_agent_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1376,7 +1500,7 @@ func (x *JobEvent) String() string {
 func (*JobEvent) ProtoMessage() {}
 
 func (x *JobEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_prober_v1_agent_proto_msgTypes[13]
+	mi := &file_prober_v1_agent_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1389,7 +1513,7 @@ func (x *JobEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobEvent.ProtoReflect.Descriptor instead.
 func (*JobEvent) Descriptor() ([]byte, []int) {
-	return file_prober_v1_agent_proto_rawDescGZIP(), []int{13}
+	return file_prober_v1_agent_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *JobEvent) GetJobId() string {
@@ -1500,7 +1624,7 @@ type JobStarted struct {
 
 func (x *JobStarted) Reset() {
 	*x = JobStarted{}
-	mi := &file_prober_v1_agent_proto_msgTypes[14]
+	mi := &file_prober_v1_agent_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1512,7 +1636,7 @@ func (x *JobStarted) String() string {
 func (*JobStarted) ProtoMessage() {}
 
 func (x *JobStarted) ProtoReflect() protoreflect.Message {
-	mi := &file_prober_v1_agent_proto_msgTypes[14]
+	mi := &file_prober_v1_agent_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1525,7 +1649,7 @@ func (x *JobStarted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobStarted.ProtoReflect.Descriptor instead.
 func (*JobStarted) Descriptor() ([]byte, []int) {
-	return file_prober_v1_agent_proto_rawDescGZIP(), []int{14}
+	return file_prober_v1_agent_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *JobStarted) GetTarget() string {
@@ -1577,7 +1701,7 @@ type Cycle struct {
 
 func (x *Cycle) Reset() {
 	*x = Cycle{}
-	mi := &file_prober_v1_agent_proto_msgTypes[15]
+	mi := &file_prober_v1_agent_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1589,7 +1713,7 @@ func (x *Cycle) String() string {
 func (*Cycle) ProtoMessage() {}
 
 func (x *Cycle) ProtoReflect() protoreflect.Message {
-	mi := &file_prober_v1_agent_proto_msgTypes[15]
+	mi := &file_prober_v1_agent_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1602,7 +1726,7 @@ func (x *Cycle) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Cycle.ProtoReflect.Descriptor instead.
 func (*Cycle) Descriptor() ([]byte, []int) {
-	return file_prober_v1_agent_proto_rawDescGZIP(), []int{15}
+	return file_prober_v1_agent_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *Cycle) GetNumber() uint32 {
@@ -1651,7 +1775,7 @@ type Hop struct {
 
 func (x *Hop) Reset() {
 	*x = Hop{}
-	mi := &file_prober_v1_agent_proto_msgTypes[16]
+	mi := &file_prober_v1_agent_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1663,7 +1787,7 @@ func (x *Hop) String() string {
 func (*Hop) ProtoMessage() {}
 
 func (x *Hop) ProtoReflect() protoreflect.Message {
-	mi := &file_prober_v1_agent_proto_msgTypes[16]
+	mi := &file_prober_v1_agent_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1676,7 +1800,7 @@ func (x *Hop) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Hop.ProtoReflect.Descriptor instead.
 func (*Hop) Descriptor() ([]byte, []int) {
-	return file_prober_v1_agent_proto_rawDescGZIP(), []int{16}
+	return file_prober_v1_agent_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *Hop) GetTtl() uint32 {
@@ -1776,7 +1900,7 @@ type HopAddress struct {
 
 func (x *HopAddress) Reset() {
 	*x = HopAddress{}
-	mi := &file_prober_v1_agent_proto_msgTypes[17]
+	mi := &file_prober_v1_agent_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1788,7 +1912,7 @@ func (x *HopAddress) String() string {
 func (*HopAddress) ProtoMessage() {}
 
 func (x *HopAddress) ProtoReflect() protoreflect.Message {
-	mi := &file_prober_v1_agent_proto_msgTypes[17]
+	mi := &file_prober_v1_agent_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1801,7 +1925,7 @@ func (x *HopAddress) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HopAddress.ProtoReflect.Descriptor instead.
 func (*HopAddress) Descriptor() ([]byte, []int) {
-	return file_prober_v1_agent_proto_rawDescGZIP(), []int{17}
+	return file_prober_v1_agent_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *HopAddress) GetIp() string {
@@ -1835,7 +1959,7 @@ type JobFinished struct {
 
 func (x *JobFinished) Reset() {
 	*x = JobFinished{}
-	mi := &file_prober_v1_agent_proto_msgTypes[18]
+	mi := &file_prober_v1_agent_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1847,7 +1971,7 @@ func (x *JobFinished) String() string {
 func (*JobFinished) ProtoMessage() {}
 
 func (x *JobFinished) ProtoReflect() protoreflect.Message {
-	mi := &file_prober_v1_agent_proto_msgTypes[18]
+	mi := &file_prober_v1_agent_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1860,7 +1984,7 @@ func (x *JobFinished) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobFinished.ProtoReflect.Descriptor instead.
 func (*JobFinished) Descriptor() ([]byte, []int) {
-	return file_prober_v1_agent_proto_rawDescGZIP(), []int{18}
+	return file_prober_v1_agent_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *JobFinished) GetCycles() uint32 {
@@ -1889,7 +2013,7 @@ type JobError struct {
 
 func (x *JobError) Reset() {
 	*x = JobError{}
-	mi := &file_prober_v1_agent_proto_msgTypes[19]
+	mi := &file_prober_v1_agent_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1901,7 +2025,7 @@ func (x *JobError) String() string {
 func (*JobError) ProtoMessage() {}
 
 func (x *JobError) ProtoReflect() protoreflect.Message {
-	mi := &file_prober_v1_agent_proto_msgTypes[19]
+	mi := &file_prober_v1_agent_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1914,7 +2038,7 @@ func (x *JobError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobError.ProtoReflect.Descriptor instead.
 func (*JobError) Descriptor() ([]byte, []int) {
-	return file_prober_v1_agent_proto_rawDescGZIP(), []int{19}
+	return file_prober_v1_agent_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *JobError) GetCode() JobError_Code {
@@ -1935,12 +2059,13 @@ var File_prober_v1_agent_proto protoreflect.FileDescriptor
 
 const file_prober_v1_agent_proto_rawDesc = "" +
 	"\n" +
-	"\x15prober/v1/agent.proto\x12\tprober.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xa2\x01\n" +
+	"\x15prober/v1/agent.proto\x12\tprober.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xc9\x01\n" +
 	"\fAgentMessage\x12(\n" +
 	"\x05hello\x18\x01 \x01(\v2\x10.prober.v1.HelloH\x00R\x05hello\x124\n" +
 	"\theartbeat\x18\x02 \x01(\v2\x14.prober.v1.HeartbeatH\x00R\theartbeat\x12+\n" +
-	"\x05event\x18\x03 \x01(\v2\x13.prober.v1.JobEventH\x00R\x05eventB\x05\n" +
-	"\x03msg\"\x81\x02\n" +
+	"\x05event\x18\x03 \x01(\v2\x13.prober.v1.JobEventH\x00R\x05event\x12%\n" +
+	"\x04pong\x18\x04 \x01(\v2\x0f.prober.v1.PongH\x00R\x04pongB\x05\n" +
+	"\x03msg\"\xa8\x02\n" +
 	"\x0eBackendMessage\x12.\n" +
 	"\awelcome\x18\x01 \x01(\v2\x12.prober.v1.WelcomeH\x00R\awelcome\x12+\n" +
 	"\x05start\x18\x02 \x01(\v2\x13.prober.v1.StartJobH\x00R\x05start\x12.\n" +
@@ -1948,7 +2073,8 @@ const file_prober_v1_agent_proto_rawDesc = "" +
 	"\n" +
 	"assignment\x18\x04 \x01(\v2\x15.prober.v1.AssignmentH\x00R\n" +
 	"assignment\x12\"\n" +
-	"\x03ack\x18\x05 \x01(\v2\x0e.prober.v1.AckH\x00R\x03ackB\x05\n" +
+	"\x03ack\x18\x05 \x01(\v2\x0e.prober.v1.AckH\x00R\x03ack\x12%\n" +
+	"\x04ping\x18\x06 \x01(\v2\x0f.prober.v1.PingH\x00R\x04pingB\x05\n" +
 	"\x03msg\"\x8c\x02\n" +
 	"\x05Hello\x12\x12\n" +
 	"\x04site\x18\x01 \x01(\tR\x04site\x12\x18\n" +
@@ -1999,7 +2125,11 @@ const file_prober_v1_agent_proto_rawDesc = "" +
 	" \x01(\v2\x14.prober.v1.TraceSpecH\x00R\x05traceB\x06\n" +
 	"\x04spec\"\x17\n" +
 	"\x03Ack\x12\x10\n" +
-	"\x03seq\x18\x01 \x01(\x04R\x03seq\"\xcf\x03\n" +
+	"\x03seq\x18\x01 \x01(\x04R\x03seq\"\x1c\n" +
+	"\x04Ping\x12\x14\n" +
+	"\x05nonce\x18\x01 \x01(\x04R\x05nonce\"\x1c\n" +
+	"\x04Pong\x12\x14\n" +
+	"\x05nonce\x18\x01 \x01(\x04R\x05nonce\"\xcf\x03\n" +
 	"\tTraceSpec\x12\x16\n" +
 	"\x06target\x18\x01 \x01(\tR\x06target\x12/\n" +
 	"\bprotocol\x18\x02 \x01(\x0e2\x13.prober.v1.ProtocolR\bprotocol\x120\n" +
@@ -2107,7 +2237,7 @@ func file_prober_v1_agent_proto_rawDescGZIP() []byte {
 }
 
 var file_prober_v1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
-var file_prober_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
+var file_prober_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
 var file_prober_v1_agent_proto_goTypes = []any{
 	(Protocol)(0),                 // 0: prober.v1.Protocol
 	(AddressFamily)(0),            // 1: prober.v1.AddressFamily
@@ -2126,54 +2256,58 @@ var file_prober_v1_agent_proto_goTypes = []any{
 	(*Assignment)(nil),            // 14: prober.v1.Assignment
 	(*Monitor)(nil),               // 15: prober.v1.Monitor
 	(*Ack)(nil),                   // 16: prober.v1.Ack
-	(*TraceSpec)(nil),             // 17: prober.v1.TraceSpec
-	(*JobEvent)(nil),              // 18: prober.v1.JobEvent
-	(*JobStarted)(nil),            // 19: prober.v1.JobStarted
-	(*Cycle)(nil),                 // 20: prober.v1.Cycle
-	(*Hop)(nil),                   // 21: prober.v1.Hop
-	(*HopAddress)(nil),            // 22: prober.v1.HopAddress
-	(*JobFinished)(nil),           // 23: prober.v1.JobFinished
-	(*JobError)(nil),              // 24: prober.v1.JobError
-	(*timestamppb.Timestamp)(nil), // 25: google.protobuf.Timestamp
+	(*Ping)(nil),                  // 17: prober.v1.Ping
+	(*Pong)(nil),                  // 18: prober.v1.Pong
+	(*TraceSpec)(nil),             // 19: prober.v1.TraceSpec
+	(*JobEvent)(nil),              // 20: prober.v1.JobEvent
+	(*JobStarted)(nil),            // 21: prober.v1.JobStarted
+	(*Cycle)(nil),                 // 22: prober.v1.Cycle
+	(*Hop)(nil),                   // 23: prober.v1.Hop
+	(*HopAddress)(nil),            // 24: prober.v1.HopAddress
+	(*JobFinished)(nil),           // 25: prober.v1.JobFinished
+	(*JobError)(nil),              // 26: prober.v1.JobError
+	(*timestamppb.Timestamp)(nil), // 27: google.protobuf.Timestamp
 }
 var file_prober_v1_agent_proto_depIdxs = []int32{
 	7,  // 0: prober.v1.AgentMessage.hello:type_name -> prober.v1.Hello
 	10, // 1: prober.v1.AgentMessage.heartbeat:type_name -> prober.v1.Heartbeat
-	18, // 2: prober.v1.AgentMessage.event:type_name -> prober.v1.JobEvent
-	11, // 3: prober.v1.BackendMessage.welcome:type_name -> prober.v1.Welcome
-	12, // 4: prober.v1.BackendMessage.start:type_name -> prober.v1.StartJob
-	13, // 5: prober.v1.BackendMessage.cancel:type_name -> prober.v1.CancelJob
-	14, // 6: prober.v1.BackendMessage.assignment:type_name -> prober.v1.Assignment
-	16, // 7: prober.v1.BackendMessage.ack:type_name -> prober.v1.Ack
-	8,  // 8: prober.v1.Hello.capabilities:type_name -> prober.v1.Capabilities
-	9,  // 9: prober.v1.Hello.limits:type_name -> prober.v1.Limits
-	25, // 10: prober.v1.Hello.started_at:type_name -> google.protobuf.Timestamp
-	25, // 11: prober.v1.Heartbeat.time:type_name -> google.protobuf.Timestamp
-	25, // 12: prober.v1.Welcome.time:type_name -> google.protobuf.Timestamp
-	17, // 13: prober.v1.StartJob.trace:type_name -> prober.v1.TraceSpec
-	15, // 14: prober.v1.Assignment.monitors:type_name -> prober.v1.Monitor
-	17, // 15: prober.v1.Monitor.trace:type_name -> prober.v1.TraceSpec
-	0,  // 16: prober.v1.TraceSpec.protocol:type_name -> prober.v1.Protocol
-	1,  // 17: prober.v1.TraceSpec.family:type_name -> prober.v1.AddressFamily
-	2,  // 18: prober.v1.TraceSpec.mode:type_name -> prober.v1.TraceMode
-	25, // 19: prober.v1.JobEvent.time:type_name -> google.protobuf.Timestamp
-	19, // 20: prober.v1.JobEvent.started:type_name -> prober.v1.JobStarted
-	20, // 21: prober.v1.JobEvent.cycle:type_name -> prober.v1.Cycle
-	23, // 22: prober.v1.JobEvent.finished:type_name -> prober.v1.JobFinished
-	24, // 23: prober.v1.JobEvent.error:type_name -> prober.v1.JobError
-	0,  // 24: prober.v1.JobStarted.protocol:type_name -> prober.v1.Protocol
-	1,  // 25: prober.v1.JobStarted.family:type_name -> prober.v1.AddressFamily
-	21, // 26: prober.v1.Cycle.hops:type_name -> prober.v1.Hop
-	22, // 27: prober.v1.Hop.addresses:type_name -> prober.v1.HopAddress
-	3,  // 28: prober.v1.JobFinished.reason:type_name -> prober.v1.JobFinished.Reason
-	4,  // 29: prober.v1.JobError.code:type_name -> prober.v1.JobError.Code
-	5,  // 30: prober.v1.AgentGateway.Session:input_type -> prober.v1.AgentMessage
-	6,  // 31: prober.v1.AgentGateway.Session:output_type -> prober.v1.BackendMessage
-	31, // [31:32] is the sub-list for method output_type
-	30, // [30:31] is the sub-list for method input_type
-	30, // [30:30] is the sub-list for extension type_name
-	30, // [30:30] is the sub-list for extension extendee
-	0,  // [0:30] is the sub-list for field type_name
+	20, // 2: prober.v1.AgentMessage.event:type_name -> prober.v1.JobEvent
+	18, // 3: prober.v1.AgentMessage.pong:type_name -> prober.v1.Pong
+	11, // 4: prober.v1.BackendMessage.welcome:type_name -> prober.v1.Welcome
+	12, // 5: prober.v1.BackendMessage.start:type_name -> prober.v1.StartJob
+	13, // 6: prober.v1.BackendMessage.cancel:type_name -> prober.v1.CancelJob
+	14, // 7: prober.v1.BackendMessage.assignment:type_name -> prober.v1.Assignment
+	16, // 8: prober.v1.BackendMessage.ack:type_name -> prober.v1.Ack
+	17, // 9: prober.v1.BackendMessage.ping:type_name -> prober.v1.Ping
+	8,  // 10: prober.v1.Hello.capabilities:type_name -> prober.v1.Capabilities
+	9,  // 11: prober.v1.Hello.limits:type_name -> prober.v1.Limits
+	27, // 12: prober.v1.Hello.started_at:type_name -> google.protobuf.Timestamp
+	27, // 13: prober.v1.Heartbeat.time:type_name -> google.protobuf.Timestamp
+	27, // 14: prober.v1.Welcome.time:type_name -> google.protobuf.Timestamp
+	19, // 15: prober.v1.StartJob.trace:type_name -> prober.v1.TraceSpec
+	15, // 16: prober.v1.Assignment.monitors:type_name -> prober.v1.Monitor
+	19, // 17: prober.v1.Monitor.trace:type_name -> prober.v1.TraceSpec
+	0,  // 18: prober.v1.TraceSpec.protocol:type_name -> prober.v1.Protocol
+	1,  // 19: prober.v1.TraceSpec.family:type_name -> prober.v1.AddressFamily
+	2,  // 20: prober.v1.TraceSpec.mode:type_name -> prober.v1.TraceMode
+	27, // 21: prober.v1.JobEvent.time:type_name -> google.protobuf.Timestamp
+	21, // 22: prober.v1.JobEvent.started:type_name -> prober.v1.JobStarted
+	22, // 23: prober.v1.JobEvent.cycle:type_name -> prober.v1.Cycle
+	25, // 24: prober.v1.JobEvent.finished:type_name -> prober.v1.JobFinished
+	26, // 25: prober.v1.JobEvent.error:type_name -> prober.v1.JobError
+	0,  // 26: prober.v1.JobStarted.protocol:type_name -> prober.v1.Protocol
+	1,  // 27: prober.v1.JobStarted.family:type_name -> prober.v1.AddressFamily
+	23, // 28: prober.v1.Cycle.hops:type_name -> prober.v1.Hop
+	24, // 29: prober.v1.Hop.addresses:type_name -> prober.v1.HopAddress
+	3,  // 30: prober.v1.JobFinished.reason:type_name -> prober.v1.JobFinished.Reason
+	4,  // 31: prober.v1.JobError.code:type_name -> prober.v1.JobError.Code
+	5,  // 32: prober.v1.AgentGateway.Session:input_type -> prober.v1.AgentMessage
+	6,  // 33: prober.v1.AgentGateway.Session:output_type -> prober.v1.BackendMessage
+	33, // [33:34] is the sub-list for method output_type
+	32, // [32:33] is the sub-list for method input_type
+	32, // [32:32] is the sub-list for extension type_name
+	32, // [32:32] is the sub-list for extension extendee
+	0,  // [0:32] is the sub-list for field type_name
 }
 
 func init() { file_prober_v1_agent_proto_init() }
@@ -2185,6 +2319,7 @@ func file_prober_v1_agent_proto_init() {
 		(*AgentMessage_Hello)(nil),
 		(*AgentMessage_Heartbeat)(nil),
 		(*AgentMessage_Event)(nil),
+		(*AgentMessage_Pong)(nil),
 	}
 	file_prober_v1_agent_proto_msgTypes[1].OneofWrappers = []any{
 		(*BackendMessage_Welcome)(nil),
@@ -2192,6 +2327,7 @@ func file_prober_v1_agent_proto_init() {
 		(*BackendMessage_Cancel)(nil),
 		(*BackendMessage_Assignment)(nil),
 		(*BackendMessage_Ack)(nil),
+		(*BackendMessage_Ping)(nil),
 	}
 	file_prober_v1_agent_proto_msgTypes[7].OneofWrappers = []any{
 		(*StartJob_Trace)(nil),
@@ -2199,20 +2335,20 @@ func file_prober_v1_agent_proto_init() {
 	file_prober_v1_agent_proto_msgTypes[10].OneofWrappers = []any{
 		(*Monitor_Trace)(nil),
 	}
-	file_prober_v1_agent_proto_msgTypes[13].OneofWrappers = []any{
+	file_prober_v1_agent_proto_msgTypes[15].OneofWrappers = []any{
 		(*JobEvent_Started)(nil),
 		(*JobEvent_Cycle)(nil),
 		(*JobEvent_Finished)(nil),
 		(*JobEvent_Error)(nil),
 	}
-	file_prober_v1_agent_proto_msgTypes[16].OneofWrappers = []any{}
+	file_prober_v1_agent_proto_msgTypes[18].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_prober_v1_agent_proto_rawDesc), len(file_prober_v1_agent_proto_rawDesc)),
 			NumEnums:      5,
-			NumMessages:   20,
+			NumMessages:   22,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

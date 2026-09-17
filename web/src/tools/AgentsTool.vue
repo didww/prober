@@ -5,6 +5,7 @@
 import { onMounted, onBeforeUnmount, ref } from 'vue'
 import { listAgents, type Agent } from '../api'
 import { since } from '../settings'
+import { ms } from '../format'
 
 const agents = ref<Agent[]>([])
 const loaded = ref(false)
@@ -45,6 +46,7 @@ onBeforeUnmount(() => {
           <th>Host</th>
           <th>Version</th>
           <th>Families</th>
+          <th class="r">Latency</th>
           <th class="r">Uptime</th>
           <th class="r">Connected</th>
           <th>Source addresses</th>
@@ -61,12 +63,13 @@ onBeforeUnmount(() => {
             <span v-if="a.ipv4" class="fam">IPv4</span>
             <span v-if="a.ipv6" class="fam">IPv6</span>
           </td>
+          <td class="r mono">{{ a.rtt_us != null ? ms(a.rtt_us) + ' ms' : '—' }}</td>
           <td class="r mono">{{ since(a.started_at, now) }}</td>
           <td class="r mono">{{ since(a.connected_at, now) }}</td>
           <td class="mono">
-            <template v-if="a.sources && a.sources.length">
+            <div v-if="a.sources && a.sources.length" class="srcs">
               <span v-for="s in a.sources" :key="s" class="src">{{ s }}</span>
-            </template>
+            </div>
             <span v-else class="dim">—</span>
           </td>
         </tr>
@@ -91,6 +94,7 @@ h1 { font-size: 16px; margin: 0; }
 .dim { color: var(--fg-dim); }
 .mono { font-variant-numeric: tabular-nums; }
 .fam { display: inline-block; margin-right: 4px; padding: 1px 6px; border: 1px solid var(--line); border-radius: 999px; font-size: 11px; color: var(--fg-dim); }
-.src { display: inline-block; margin-right: 8px; }
+.srcs { display: flex; flex-direction: column; gap: 2px; }
+.src { display: block; }
 .hint { color: var(--fg-dim); padding: 30px 0; text-align: center; }
 </style>

@@ -116,22 +116,61 @@ func New(cfg Config, log *slog.Logger, build BuildInfo) (*Agent, error) {
 }
 
 // egressSources reports the addresses this host would send probes from, one per
-// available family, by asking the routing (a UDP dial, no packets sent) for the
-// source it would use to reach a public target. Best effort: an unroutable
-// family is simply omitted.
+// available family.
+//
+// First choice is the routing's own answer: a UDP dial to a public target of
+// that family (no packets sent) yields the source the kernel would use. When
+// there is no default route to that public target — an agent with IPv6 sockets
+// but no public IPv6 egress, say — it falls back to a global-unicast address on
+// a local interface, which is the source on-link targets of that family would
+// use. A family with neither is omitted.
 func egressSources(caps trace.Capabilities) []string {
 	var out []string
 	if caps.IPv4 {
-		if a := dialSource(netip.MustParseAddr("1.1.1.1"), 443); a.IsValid() {
-			out = append(out, a.String())
+		if s := egressSource(netip.MustParseAddr("1.1.1.1"), false); s != "" {
+			out = append(out, s)
 		}
 	}
 	if caps.IPv6 {
-		if a := dialSource(netip.MustParseAddr("2606:4700:4700::1111"), 443); a.IsValid() {
-			out = append(out, a.String())
+		if s := egressSource(netip.MustParseAddr("2606:4700:4700::1111"), true); s != "" {
+			out = append(out, s)
 		}
 	}
 	return out
+}
+
+func egressSource(publicTarget netip.Addr, v6 bool) string {
+	if a := dialSource(publicTarget, 443); a.IsValid() {
+		return a.String()
+	}
+	return globalUnicast(v6)
+}
+
+// globalUnicast returns the first global-unicast, non-link-local address of the
+// requested family on a local interface, or empty if there is none.
+func globalUnicast(v6 bool) string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return ""
+	}
+	for _, a := range addrs {
+		ipn, ok := a.(*net.IPNet)
+		if !ok {
+			continue
+		}
+		ip, ok := netip.AddrFromSlice(ipn.IP)
+		if !ok {
+			continue
+		}
+		ip = ip.Unmap()
+		if ip.Is6() != v6 {
+			continue
+		}
+		if ip.IsGlobalUnicast() && !ip.IsLinkLocalUnicast() && !ip.IsLoopback() {
+			return ip.String()
+		}
+	}
+	return ""
 }
 
 func (a *Agent) Close() error { return a.engine.Close() }
@@ -224,6 +263,9 @@ func (a *Agent) session(ctx context.Context) error {
 			a.startJob(sessCtx, m.Start, send)
 		case *pb.BackendMessage_Cancel:
 			a.jobs.cancel(m.Cancel.JobId)
+		case *pb.BackendMessage_Ping:
+			// Echo at once so the backend can measure the round trip.
+			_ = send(&pb.AgentMessage{Msg: &pb.AgentMessage_Pong{Pong: &pb.Pong{Nonce: m.Ping.Nonce}}})
 		}
 	}
 }

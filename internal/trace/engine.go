@@ -74,20 +74,34 @@ func New(log *slog.Logger) (*Engine, error) {
 		closed: make(chan struct{}),
 	}
 
+	// A family is usable only if the host has an address of it — otherwise the
+	// raw socket opens but no probe can leave. A node with net.ipv6.conf.all.
+	// disable_ipv6=1 has no IPv6 address at all (not even ::1), so its ICMPv6
+	// socket opens yet IPv6 is dead; reporting it available would make the
+	// engine prefer IPv6 for a dual-stack target and every probe would fail.
 	var errs []error
-	f4, err := openFamily(false)
-	if err != nil {
-		errs = append(errs, fmt.Errorf("ipv4: %w", err))
+	if hasFamilyAddr(false) {
+		if f4, err := openFamily(false); err != nil {
+			errs = append(errs, fmt.Errorf("ipv4: %w", err))
+		} else {
+			e.v4 = f4
+		}
 	} else {
-		e.v4 = f4
+		log.Debug("trace: IPv4 unavailable (no IPv4 address on any interface)")
 	}
-	f6, err := openFamily(true)
-	if err != nil {
-		errs = append(errs, fmt.Errorf("ipv6: %w", err))
+	if hasFamilyAddr(true) {
+		if f6, err := openFamily(true); err != nil {
+			errs = append(errs, fmt.Errorf("ipv6: %w", err))
+		} else {
+			e.v6 = f6
+		}
 	} else {
-		e.v6 = f6
+		log.Debug("trace: IPv6 unavailable (no IPv6 address; disable_ipv6?)")
 	}
 	if e.v4 == nil && e.v6 == nil {
+		if len(errs) == 0 {
+			return nil, errors.New("trace: no usable address family (no IPv4 or IPv6 address on any interface)")
+		}
 		return nil, fmt.Errorf("trace: no raw ICMP socket could be opened (CAP_NET_RAW?): %w", errors.Join(errs...))
 	}
 	for _, err := range errs {
@@ -103,6 +117,28 @@ func New(log *slog.Logger) (*Engine, error) {
 		go e.readLoop(e.v6)
 	}
 	return e, nil
+}
+
+// hasFamilyAddr reports whether any interface carries an address of the given
+// family. It counts loopback (127.0.0.1 / ::1), which is enough to trace
+// loopback and on-link targets; disabling IPv6 removes even ::1, so this is
+// false there. If the interfaces cannot be read, it assumes available rather
+// than wrongly disabling a family.
+func hasFamilyAddr(v6 bool) bool {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return true
+	}
+	for _, a := range addrs {
+		ipn, ok := a.(*net.IPNet)
+		if !ok {
+			continue
+		}
+		if ip, ok := netip.AddrFromSlice(ipn.IP); ok && ip.Unmap().Is6() == v6 {
+			return true
+		}
+	}
+	return false
 }
 
 func openFamily(v6 bool) (*family, error) {

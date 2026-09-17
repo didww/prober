@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"context"
 	"crypto/subtle"
 	"errors"
 	"io"
@@ -66,12 +67,55 @@ type agentConn struct {
 	connectedAt time.Time
 
 	sendMu sync.Mutex
+
+	// Round-trip latency, measured with Ping/Pong on the stream.
+	pingMu     sync.Mutex
+	pingNonce  uint64
+	pingSentAt time.Time
+	rttUs      atomicInt64
 }
+
+// atomicInt64 is a tiny atomic wrapper (Go's sync/atomic type by another name
+// to avoid importing it at the top for one field elsewhere).
+type atomicInt64 = atomicI64
 
 func (a *agentConn) send(m *pb.BackendMessage) error {
 	a.sendMu.Lock()
 	defer a.sendMu.Unlock()
 	return a.stream.Send(m)
+}
+
+func (a *agentConn) pingLoop(ctx context.Context) {
+	t := time.NewTicker(10 * time.Second)
+	defer t.Stop()
+	a.ping()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			a.ping()
+		}
+	}
+}
+
+func (a *agentConn) ping() {
+	a.pingMu.Lock()
+	a.pingNonce++
+	nonce := a.pingNonce
+	a.pingSentAt = time.Now()
+	a.pingMu.Unlock()
+	_ = a.send(&pb.BackendMessage{Msg: &pb.BackendMessage_Ping{Ping: &pb.Ping{Nonce: nonce}}})
+}
+
+func (a *agentConn) onPong(nonce uint64) {
+	a.pingMu.Lock()
+	match := nonce == a.pingNonce
+	sent := a.pingSentAt
+	a.pingMu.Unlock()
+	if match {
+		a.rttUs.Store(time.Since(sent).Microseconds())
+	}
 }
 
 // bearerToken reads the token from the stream metadata.
@@ -159,6 +203,13 @@ func (g *Gateway) Session(stream pb.AgentGateway_SessionServer) error {
 		return err
 	}
 
+	// Measure the round trip: one ping now, then every 10s, until the stream
+	// ends. rttUs starts at -1 (unknown) until the first Pong.
+	conn.rttUs.Store(-1)
+	pingCtx, stopPing := context.WithCancel(stream.Context())
+	defer stopPing()
+	go conn.pingLoop(pingCtx)
+
 	for {
 		msg, err := stream.Recv()
 		if err != nil {
@@ -171,6 +222,8 @@ func (g *Gateway) Session(stream pb.AgentGateway_SessionServer) error {
 		switch m := msg.Msg.(type) {
 		case *pb.AgentMessage_Event:
 			g.route(m.Event)
+		case *pb.AgentMessage_Pong:
+			conn.onPong(m.Pong.Nonce)
 		case *pb.AgentMessage_Heartbeat:
 			// Liveness only; connection state is the registry.
 		case *pb.AgentMessage_Hello:
@@ -223,6 +276,9 @@ func (g *Gateway) Sites() []*pb.Hello {
 type AgentInfo struct {
 	Hello       *pb.Hello
 	ConnectedAt time.Time
+	// RTTMicros is the backend<->agent round trip in microseconds, or -1 until
+	// the first Pong.
+	RTTMicros int64
 }
 
 // Agents returns every connected agent with its connection time, for the
@@ -232,7 +288,7 @@ func (g *Gateway) Agents() []AgentInfo {
 	defer g.mu.RUnlock()
 	out := make([]AgentInfo, 0, len(g.agents))
 	for _, c := range g.agents {
-		out = append(out, AgentInfo{Hello: c.hello, ConnectedAt: c.connectedAt})
+		out = append(out, AgentInfo{Hello: c.hello, ConnectedAt: c.connectedAt, RTTMicros: c.rttUs.Load()})
 	}
 	return out
 }

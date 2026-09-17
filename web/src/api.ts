@@ -27,6 +27,7 @@ export interface Agent {
   sources: string[]
   started_at: string
   connected_at: string
+  rtt_us: number | null
 }
 
 export type Protocol = 'icmp' | 'udp' | 'tcp'

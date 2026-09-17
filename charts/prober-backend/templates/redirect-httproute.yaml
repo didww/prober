@@ -1,0 +1,46 @@
+{{- if .Values.httpRoute.redirParentRefs }}
+{{- if not .Values.httpRoute.enabled }}
+{{- fail "httpRoute.redirParentRefs is set but httpRoute.enabled is false — a redirect to https with nothing serving https is a loop. Enable the main route as well." }}
+{{- end }}
+{{/*
+A route with no backendRefs: Gateway API requires exactly that for a
+RequestRedirect, which is why this cannot be a second rule on the main route.
+
+redirParentRefs is the switch as well as the setting: it names the PLAINTEXT
+listener, the one thing here with no sensible default (inheriting the main
+route's parentRefs would attach the redirect to the https listener and loop), so
+its absence is how you say "no redirect route".
+
+It matches "/" rather than base_path: redirecting only the sub-path would leave
+every other http request on the hostname unhandled.
+*/}}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "prober-backend.fullname" . }}-redirect
+  labels:
+    {{- include "prober-backend.labels" . | nindent 4 }}
+    {{- with .Values.httpRoute.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with .Values.httpRoute.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  parentRefs:
+    {{- toYaml .Values.httpRoute.redirParentRefs | nindent 4 }}
+  {{- with (default .Values.httpRoute.hostnames .Values.httpRoute.redirHostnames) }}
+  hostnames:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - filters:
+        - type: RequestRedirect
+          requestRedirect:
+            scheme: https
+            statusCode: {{ .Values.httpRoute.redirStatusCode }}
+            {{- with .Values.httpRoute.redirPort }}
+            port: {{ . }}
+            {{- end }}
+{{- end }}

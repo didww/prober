@@ -50,3 +50,15 @@ in a pod is reachable from nothing). Ports are left as configured. */}}
 {{- define "prober-backend.grpcPort" -}}
 {{- last (splitList ":" (default "0.0.0.0:50051" .Values.config.listen.grpc.addr)) -}}
 {{- end -}}
+
+{{- define "prober-backend.basePath" -}}
+{{- default "" .Values.config.base_path -}}
+{{- end -}}
+
+{{- define "prober-backend.metricsPort" -}}
+{{- .Values.metricsPort -}}
+{{- end -}}
+
+{{- define "prober-backend.metricsPath" -}}
+/metrics
+{{- end -}}

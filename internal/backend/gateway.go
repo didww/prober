@@ -21,8 +21,10 @@ import (
 type Gateway struct {
 	pb.UnimplementedAgentGatewayServer
 
-	log    *slog.Logger
-	tokens map[string]string // token -> site
+	log          *slog.Logger
+	tokens       map[string]string   // pinned token -> site (authoritative)
+	sharedToken  string              // enrollment token: any agent may register under the site it declares
+	allowedSites map[string]struct{} // when non-empty, constrains shared-token sites
 
 	mu     sync.RWMutex
 	agents map[string]*agentConn // site -> connection
@@ -40,11 +42,17 @@ func NewGateway(cfg Config, log *slog.Logger) *Gateway {
 	for _, a := range cfg.Agents {
 		tokens[a.Token] = a.Site
 	}
+	allowed := make(map[string]struct{}, len(cfg.AllowedSites))
+	for _, s := range cfg.AllowedSites {
+		allowed[s] = struct{}{}
+	}
 	return &Gateway{
-		log:    log,
-		tokens: tokens,
-		agents: make(map[string]*agentConn),
-		sinks:  make(map[string]EventSink),
+		log:          log,
+		tokens:       tokens,
+		sharedToken:  cfg.AgentToken,
+		allowedSites: allowed,
+		agents:       make(map[string]*agentConn),
+		sinks:        make(map[string]EventSink),
 	}
 }
 
@@ -64,41 +72,60 @@ func (a *agentConn) send(m *pb.BackendMessage) error {
 	return a.stream.Send(m)
 }
 
-// authSite returns the site a stream's token authenticates, in constant time.
-func (g *Gateway) authSite(stream pb.AgentGateway_SessionServer) (string, error) {
+// bearerToken reads the token from the stream metadata.
+func bearerToken(stream pb.AgentGateway_SessionServer) string {
 	md, ok := metadata.FromIncomingContext(stream.Context())
 	if !ok {
-		return "", status.Error(codes.Unauthenticated, "missing metadata")
+		return ""
 	}
-	var tok string
 	if v := md.Get("authorization"); len(v) == 1 {
 		const p = "Bearer "
 		if len(v[0]) > len(p) && v[0][:len(p)] == p {
-			tok = v[0][len(p):]
+			return v[0][len(p):]
 		}
 	}
+	return ""
+}
+
+// authSite decides which site a stream may register as, given its token and
+// the site it declared in Hello.
+//
+// A token that matches a pinned per-site token authenticates that site,
+// authoritatively — the Hello's claim is ignored. Otherwise, if a shared
+// enrollment token is configured and matches, the agent registers under the
+// site it declared (autoregistration), optionally constrained to allowed_sites.
+// All comparisons are constant time, so a wrong token cannot be told from
+// another by timing.
+func (g *Gateway) authSite(tok string, hello *pb.Hello) (string, error) {
 	if tok == "" {
 		return "", status.Error(codes.Unauthenticated, "missing bearer token")
 	}
-	// Compare against every known token in constant time, so a wrong token
-	// cannot be distinguished from another by timing.
-	site := ""
+	pinned := ""
 	for known, s := range g.tokens {
 		if subtle.ConstantTimeCompare([]byte(tok), []byte(known)) == 1 {
-			site = s
+			pinned = s
 		}
 	}
-	if site == "" {
-		return "", status.Error(codes.Unauthenticated, "unknown token")
+	if pinned != "" {
+		return pinned, nil
 	}
-	return site, nil
+	if g.sharedToken != "" && subtle.ConstantTimeCompare([]byte(tok), []byte(g.sharedToken)) == 1 {
+		site := hello.GetSite()
+		if site == "" {
+			return "", status.Error(codes.InvalidArgument, "hello.site is required to register with the shared token")
+		}
+		if len(g.allowedSites) > 0 {
+			if _, ok := g.allowedSites[site]; !ok {
+				return "", status.Errorf(codes.PermissionDenied, "site %q is not in allowed_sites", site)
+			}
+		}
+		return site, nil
+	}
+	return "", status.Error(codes.Unauthenticated, "unknown token")
 }
 
 func (g *Gateway) Session(stream pb.AgentGateway_SessionServer) error {
-	site, err := g.authSite(stream)
-	if err != nil {
-		return err
-	}
+	tok := bearerToken(stream)
 
 	first, err := stream.Recv()
 	if err != nil {
@@ -107,6 +134,13 @@ func (g *Gateway) Session(stream pb.AgentGateway_SessionServer) error {
 	hello := first.GetHello()
 	if hello == nil {
 		return status.Error(codes.InvalidArgument, "first message must be Hello")
+	}
+
+	// The site comes from the token (pinned) or, with the shared token, from
+	// the agent's own declaration.
+	site, err := g.authSite(tok, hello)
+	if err != nil {
+		return err
 	}
 
 	conn := &agentConn{site: site, hello: hello, stream: stream}

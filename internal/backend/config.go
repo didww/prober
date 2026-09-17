@@ -24,9 +24,22 @@ type Config struct {
 	// agent gRPC listener, which is authenticated by its own per-agent token.
 	Auth auth.Config `yaml:"auth"`
 
-	// Agents maps a bearer token to the site it authenticates. The agent
-	// sends the token in the stream metadata; the site derived here is
-	// authoritative over whatever the agent claims in Hello.
+	// AgentToken is a single shared enrollment token. Any agent presenting it
+	// registers under the site it declares in its Hello (autoregistration), so
+	// a new PoP needs no backend config change — only the token. It is weaker
+	// than per-site tokens: whoever holds it can register as any site, so use
+	// it on a trusted network, and constrain it with AllowedSites if you can
+	// enumerate the sites up front.
+	AgentToken string `yaml:"agent_token"`
+
+	// AllowedSites, when set, limits which sites the shared token may register.
+	// It does not affect pinned per-site tokens in Agents.
+	AllowedSites []string `yaml:"allowed_sites"`
+
+	// Agents pins a bearer token to a specific site. A token here is
+	// authoritative for its site over whatever the agent claims in Hello, and
+	// takes precedence over the shared token. Use it for sites that need a
+	// stronger identity than the shared token gives.
 	Agents []AgentAuth `yaml:"agents"`
 
 	// RunTTL is how long a finished run's events stay replayable for a late

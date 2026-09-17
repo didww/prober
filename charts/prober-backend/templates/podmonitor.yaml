@@ -1,0 +1,42 @@
+{{- if .Values.podMonitor.enabled }}
+{{- if not (include "prober-backend.metricsPort" .) }}
+{{- fail "podMonitor.enabled is true but metricsPort is empty — there is no exporter to scrape" }}
+{{- end }}
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ include "prober-backend.fullname" . }}
+  labels:
+    {{- include "prober-backend.labels" . | nindent 4 }}
+    {{- with .Values.podMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with .Values.podMonitor.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "prober-backend.selectorLabels" . | nindent 6 }}
+  # Explicit, so a PodMonitor cannot scrape a second release of this chart in
+  # another namespace as if it were this one.
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  podMetricsEndpoints:
+    # By port NAME, so it survives a metrics port change.
+    - port: metrics
+      path: {{ include "prober-backend.metricsPath" . }}
+      interval: {{ .Values.podMonitor.interval }}
+      scrapeTimeout: {{ .Values.podMonitor.scrapeTimeout }}
+      scheme: http
+      {{- with .Values.podMonitor.relabelings }}
+      relabelings:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.podMonitor.metricRelabelings }}
+      metricRelabelings:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

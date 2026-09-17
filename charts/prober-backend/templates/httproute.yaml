@@ -1,0 +1,51 @@
+{{- if .Values.httpRoute.enabled }}
+{{- if not .Values.httpRoute.parentRefs }}
+{{- fail "httpRoute.enabled is true but httpRoute.parentRefs is empty. parentRefs names the Gateway to attach to (kubectl get gateway -A); a route with no parent routes nothing. If you have no Gateway, set httpRoute.enabled=false and reach the Service another way." }}
+{{- end }}
+{{- $base := include "prober-backend.basePath" . }}
+{{- $prefix := default $base .Values.httpRoute.pathPrefix | default "/" }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "prober-backend.fullname" . }}
+  labels:
+    {{- include "prober-backend.labels" . | nindent 4 }}
+    {{- with .Values.httpRoute.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with .Values.httpRoute.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  parentRefs:
+    {{- toYaml .Values.httpRoute.parentRefs | nindent 4 }}
+  {{- with .Values.httpRoute.hostnames }}
+  hostnames:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: {{ $prefix | quote }}
+      {{- with .Values.httpRoute.filters }}
+      filters:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.httpRoute.timeouts }}
+      # The SSE run stream is a response that stays open for the length of a
+      # trace. A Gateway's default request timeout would cut it, and the browser
+      # would reconnect in a loop; 0s disables it.
+      timeouts:
+        {{- range $k, $v := . }}
+        {{- if $v }}
+        {{ $k }}: {{ $v | quote }}
+        {{- end }}
+        {{- end }}
+      {{- end }}
+      backendRefs:
+        - name: {{ include "prober-backend.fullname" . }}
+          port: {{ .Values.service.httpPort }}
+          kind: Service
+{{- end }}

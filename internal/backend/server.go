@@ -40,6 +40,13 @@ func New(ctx context.Context, cfg Config, log *slog.Logger, version, commit stri
 	gw := NewGateway(cfg, log)
 	mgr := NewManager(gw, cfg.runTTL())
 
+	if cfg.AgentToken == "" && len(cfg.Agents) == 0 {
+		log.Warn("no agent auth configured: no agent can connect until you set agent_token (shared) or agents (per-site)")
+	} else if cfg.AgentToken != "" {
+		log.Info("shared agent token enabled: agents autoregister under the site they declare",
+			"pinned_sites", len(cfg.Agents), "allowed_sites", len(cfg.AllowedSites))
+	}
+
 	var a *auth.Auth
 	if cfg.Auth.Enabled {
 		var err error

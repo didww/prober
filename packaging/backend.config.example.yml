@@ -12,12 +12,20 @@ listen:
 
 # base_path: /prober          # mount the UI under a sub-path (behind nginx)
 
-# Each agent authenticates with a bearer token that maps to its site.
-agents:
-  - site: fra
-    token: "CHANGEME-fra-token"
-  - site: ams
-    token: "CHANGEME-ams-token"
+# Agent authentication. Two options, and they can be combined.
+#
+# A single shared enrollment token: any agent presenting it registers under the
+# site it declares, so a new PoP needs only the token, no config change here.
+# Constrain it with allowed_sites when you can enumerate the sites.
+agent_token: "CHANGEME-shared-enrollment-token"
+allowed_sites: [fra, ams, nyc, lac, mia, sg, hk, me]
+
+# Per-site tokens, for sites that need a stronger identity than the shared
+# token. A token here is authoritative for its site and overrides the shared
+# one. Optional; leave empty to use only the shared token.
+agents: []
+#   - site: fra
+#     token: "CHANGEME-fra-token"
 
 # OIDC login for the UI. Off means every browser request is anonymous.
 auth:

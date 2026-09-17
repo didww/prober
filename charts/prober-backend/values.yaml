@@ -25,6 +25,12 @@ config:
       key_file: /etc/prober/tls/tls.key
     http: "0.0.0.0:8080"
     metrics: "0.0.0.0:9108"
+  # A single shared enrollment token: agents autoregister under the site they
+  # declare. Simplest for many PoPs. Constrain with allowed_sites.
+  agent_token: ""
+  allowed_sites: []
+  # Per-site tokens override the shared one for sites needing a stronger
+  # identity. Optional.
   agents: []
   #   - site: fra
   #     token: "..."
@@ -70,3 +76,63 @@ resources:
 nodeSelector: {}
 affinity: {}
 tolerations: []
+
+# ---------------------------------------------------------------------------
+# HTTPRoute (Gateway API) to expose the web UI — not an Ingress. Requires the
+# Gateway API CRDs and a Gateway to attach to; this chart installs neither.
+# ---------------------------------------------------------------------------
+httpRoute:
+  enabled: false
+  annotations: {}
+  labels: {}
+  # The Gateway(s) to attach to. Required when enabled — a route with no parent
+  # routes nothing, so the template refuses to render without it.
+  parentRefs: []
+  #  - name: external
+  #    namespace: gateway-system
+  #    sectionName: https
+  hostnames: []
+  #  - prober.example.com
+  # Path prefix to match. Empty follows config.base_path — the prefix the app
+  # itself serves under. Serving at a prefix without base_path needs a
+  # URLRewrite filter to strip it.
+  pathPrefix: ""
+  filters: []
+  # The SSE run stream is long-lived; 0s disables the Gateway's request timeout
+  # so a trace is not cut mid-stream.
+  timeouts:
+    request: 0s
+    backendRequest: 0s
+
+  # HTTP -> HTTPS redirect, as a SECOND route with no backend (Gateway API
+  # forbids a RequestRedirect on a rule that also has backendRefs).
+  #
+  # redirParentRefs is both the switch and the setting: name the PLAINTEXT
+  # listener here to emit the redirect route. Empty = no redirect (many Gateways
+  # redirect at the listener instead, which is cheaper). Do NOT point it at the
+  # https listener above — that would 301 already-secure traffic in a loop.
+  redirParentRefs: []
+  #  - name: external
+  #    namespace: gateway-system
+  #    sectionName: http
+  # Defaults to `hostnames` above, which is almost always right.
+  redirHostnames: []
+  # 301 permanent, 302 temporary, 308 permanent preserving the method.
+  redirStatusCode: 301
+  # Only if https is not on 443.
+  redirPort: ""
+
+# ---------------------------------------------------------------------------
+# PodMonitor (Prometheus Operator) — scrapes the pod's metrics port directly,
+# which is why the chart forces metrics.listen to 0.0.0.0. Requires the
+# monitoring.coreos.com CRDs; whether your Prometheus picks it up depends on
+# its podMonitorSelector (often a release label, set via podMonitor.labels).
+# ---------------------------------------------------------------------------
+podMonitor:
+  enabled: false
+  labels: {}
+  annotations: {}
+  interval: 30s
+  scrapeTimeout: 10s
+  relabelings: []
+  metricRelabelings: []

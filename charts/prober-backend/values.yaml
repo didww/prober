@@ -62,10 +62,20 @@ tls:
   key: ""
 
 service:
+  # ClusterIP by default. Set LoadBalancer (or NodePort) to expose the gateway
+  # to agents outside the cluster.
   type: ClusterIP
   httpPort: 8080
   grpcPort: 50051
   annotations: {}
+  # Preserve the agent's real source IP instead of SNATing it to a node.
+  # "Local" keeps the source IP but only routes to pods on the receiving node,
+  # so pair it with a per-node presence or a LoadBalancer that health-checks
+  # nodes. Only valid for LoadBalancer/NodePort; ignored for ClusterIP.
+  externalTrafficPolicy: ""       # "" leaves it unset (defaults to Cluster); set "Local" to keep source IPs
+  # loadBalancerClass: ""
+  # loadBalancerIP: ""
+  # externalIPs: []
 
 podAnnotations: {}
 podLabels: {}

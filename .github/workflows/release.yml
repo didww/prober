@@ -72,7 +72,7 @@ jobs:
           Maintainer: DIDWW Engineering <engineering@didww.com>
           Section: net
           Priority: optional
-          Description: prober looking glass — $pkg
+          Description: prober looking glass - $pkg
            Native Go traceroute probing. See https://github.com/didww/prober
           CTL
             # Bake the package name into the shared maintainer scripts.

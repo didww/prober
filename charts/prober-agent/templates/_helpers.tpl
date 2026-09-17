@@ -40,9 +40,14 @@ backend:
 {{- end }}
 {{- if .Values.backend.insecureSkipVerify }}
   insecure_skip_verify: true
-{{- else if .Values.backend.ca }}
+{{- else }}
+{{- if .Values.backend.skipHostnameVerify }}
+  skip_hostname_verify: true
+{{- end }}
+{{- with .Values.backend.ca }}
   ca: |
-    {{- .Values.backend.ca | nindent 4 }}
+    {{- . | nindent 4 }}
+{{- end }}
 {{- end }}
 limits:
   max_concurrent_jobs: {{ .Values.limits.maxConcurrentJobs }}

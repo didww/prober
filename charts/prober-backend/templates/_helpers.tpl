@@ -40,6 +40,10 @@ in a pod is reachable from nothing). Ports are left as configured. */}}
 {{- end -}}
 {{- if $l.grpc -}}
 {{- $_ := set $l.grpc "addr" (printf "0.0.0.0:%s" (last (splitList ":" (default "0.0.0.0:50051" $l.grpc.addr)))) -}}
+{{- if include "prober-backend.tlsSecretName" . -}}
+{{- $_ := set $l.grpc "cert_file" "/etc/prober/tls/tls.crt" -}}
+{{- $_ := set $l.grpc "key_file" "/etc/prober/tls/tls.key" -}}
+{{- end -}}
 {{- end -}}
 {{- toYaml $cfg -}}
 {{- end -}}
@@ -49,6 +53,16 @@ in a pod is reachable from nothing). Ports are left as configured. */}}
 {{- end -}}
 {{- define "prober-backend.grpcPort" -}}
 {{- last (splitList ":" (default "0.0.0.0:50051" .Values.config.listen.grpc.addr)) -}}
+{{- end -}}
+
+{{/* The TLS secret the gateway mounts: an existing one, or the chart-created
+one from tls.cert/tls.key. Empty when TLS is supplied inline in the config. */}}
+{{- define "prober-backend.tlsSecretName" -}}
+{{- if .Values.tls.secretName -}}
+{{- .Values.tls.secretName -}}
+{{- else if and .Values.tls.cert .Values.tls.key -}}
+{{- printf "%s-tls" (include "prober-backend.fullname" .) -}}
+{{- end -}}
 {{- end -}}
 
 {{- define "prober-backend.basePath" -}}

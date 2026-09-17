@@ -1,5 +1,6 @@
-{{- if not .Values.tls.secretName }}
-{{- fail "prober-backend: tls.secretName is required — the gRPC gateway must present a certificate to agents" }}
+{{- $tlsSecret := include "prober-backend.tlsSecretName" . }}
+{{- if and (not $tlsSecret) (not (and .Values.config.listen.grpc.cert .Values.config.listen.grpc.key)) }}
+{{- fail "prober-backend: the gRPC gateway needs a TLS keypair — set tls.secretName (existing Secret), tls.cert/tls.key (chart makes a kubernetes.io/tls Secret), or config.listen.grpc.cert/.key (inline)" }}
 {{- end }}
 apiVersion: apps/v1
 kind: Deployment
@@ -62,18 +63,22 @@ spec:
               mountPath: /etc/prober/config.yml
               subPath: config.yml
               readOnly: true
+            {{- if $tlsSecret }}
             - name: tls
               mountPath: /etc/prober/tls
               readOnly: true
+            {{- end }}
       volumes:
         - name: config
-          secret:
-            secretName: {{ include "prober-backend.fullname" . }}-config
+          configMap:
+            name: {{ include "prober-backend.fullname" . }}-config
             defaultMode: 0444
+        {{- if $tlsSecret }}
         - name: tls
           secret:
-            secretName: {{ .Values.tls.secretName }}
+            secretName: {{ $tlsSecret }}
             defaultMode: 0444
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

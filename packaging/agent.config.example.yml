@@ -7,6 +7,11 @@ backend:
   ca_file: /opt/prober-agent/etc/backend-ca.pem
   # ca: |                      # inline CA instead of ca_file
   # server_name: prober-backend.example.com
+  # Verify the chain to the CA but not the certificate's hostname/SAN — for
+  # when the agent dials the backend by a name not in the cert (a k8s Service
+  # name, an internal address). Weaker than full verification, far stronger
+  # than insecure_skip_verify.
+  # skip_hostname_verify: false
   # insecure_skip_verify: false
 
 limits:

@@ -9,6 +9,9 @@ backend:
   # Dev/testing only: skip verifying the backend certificate. The token then
   # travels over an unauthenticated (though still encrypted) connection.
   # insecure_skip_verify: false
+  # Verify the chain to the CA but not the hostname/SAN (e.g. when dialling by
+  # a k8s Service name):
+  # skip_hostname_verify: false
 
 limits:
   max_concurrent_jobs: 20

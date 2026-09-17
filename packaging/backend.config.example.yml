@@ -5,8 +5,15 @@
 listen:
   grpc:
     addr: "0.0.0.0:50051"
+    # The gateway's TLS keypair: as file paths, or inline (a full PEM each).
     cert_file: /opt/prober-backend/etc/tls.crt
     key_file: /opt/prober-backend/etc/tls.key
+    # cert: |
+    #   -----BEGIN CERTIFICATE-----
+    #   ...
+    # key: |
+    #   -----BEGIN PRIVATE KEY-----
+    #   ...
   http: "0.0.0.0:8080"
   metrics: "127.0.0.1:9108"
 

@@ -21,8 +21,14 @@ config:
   listen:
     grpc:
       addr: "0.0.0.0:50051"
-      cert_file: /etc/prober/tls/tls.crt
-      key_file: /etc/prober/tls/tls.key
+      # The gateway's TLS keypair comes from ONE of two places:
+      #   - tls.secretName below (a kubernetes.io/tls Secret, mounted), or
+      #   - cert/key inline here (a full PEM each) — handy inside a
+      #     sops-encrypted values file, and it needs no Secret.
+      # cert: |
+      #   -----BEGIN CERTIFICATE-----
+      # key: |
+      #   -----BEGIN PRIVATE KEY-----
     http: "0.0.0.0:8080"
     metrics: "0.0.0.0:9108"
   # A single shared enrollment token: agents autoregister under the site they
@@ -37,11 +43,23 @@ config:
   auth:
     enabled: false
 
-# The TLS keypair the gRPC gateway presents to agents. Provide a
-# kubernetes.io/tls Secret (cert-manager, or created by hand) and name it here;
-# it is mounted at /etc/prober/tls.
+# The TLS keypair the gRPC gateway presents to agents. Three ways, in order of
+# preference for a cluster with certificate-expiry monitoring:
+#
+#   1. tls.secretName — an existing kubernetes.io/tls Secret (cert-manager, or
+#      created by hand). Best when cert-manager renews it.
+#   2. tls.cert / tls.key — the PEM here (put them in a sops-encrypted values
+#      file). The chart renders a kubernetes.io/tls Secret from them, which is
+#      what a Prometheus cert exporter (e.g. x509-certificate-exporter) scrapes
+#      for expiry. Mounted like case 1.
+#   3. config.listen.grpc.cert/key inline — no Secret at all; the key lands in
+#      the ConfigMap and is NOT visible to expiry monitoring. Avoid in k8s.
+#
+# A kubernetes.io/tls Secret (cases 1 and 2) is the monitorable one.
 tls:
   secretName: ""
+  cert: ""
+  key: ""
 
 service:
   type: ClusterIP

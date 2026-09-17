@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "prober-backend.fullname" . }}-config
+  labels:
+    {{- include "prober-backend.labels" . | nindent 4 }}
+data:
+  # Note: this config carries the agent token(s) and, with auth on, the OIDC
+  # client and cookie secrets. In a ConfigMap they are readable by anything with
+  # configmap read in this namespace (including the built-in `view` role) and
+  # are not treated as sensitive by RBAC, audit or backups. Restrict access to
+  # this namespace accordingly, or template the config into a Secret yourself
+  # and change the volume below to mount it.
+  config.yml: |
+    {{- include "prober-backend.renderedConfig" . | nindent 4 }}

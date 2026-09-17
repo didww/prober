@@ -5,8 +5,10 @@
 package backend
 
 import (
+	"crypto/tls"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/didww/prober/internal/auth"
@@ -58,9 +60,46 @@ type ListenConfig struct {
 }
 
 type GRPCListen struct {
-	Addr     string `yaml:"addr"`
+	Addr string `yaml:"addr"`
+
+	// The TLS keypair the gateway presents to agents. Give each either inline
+	// (cert / key, a full PEM) or as a path (cert_file / key_file), not both.
+	Cert     string `yaml:"cert"`
 	CertFile string `yaml:"cert_file"`
+	Key      string `yaml:"key"`
 	KeyFile  string `yaml:"key_file"`
+}
+
+// certificate loads the gateway's TLS keypair from whichever source is set.
+func (g GRPCListen) certificate() (tls.Certificate, error) {
+	if g.Cert != "" && g.CertFile != "" {
+		return tls.Certificate{}, errors.New("listen.grpc: set only one of cert or cert_file")
+	}
+	if g.Key != "" && g.KeyFile != "" {
+		return tls.Certificate{}, errors.New("listen.grpc: set only one of key or key_file")
+	}
+	certPEM, err := pemBytes(g.Cert, g.CertFile)
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("listen.grpc cert: %w", err)
+	}
+	keyPEM, err := pemBytes(g.Key, g.KeyFile)
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("listen.grpc key: %w", err)
+	}
+	return tls.X509KeyPair(certPEM, keyPEM)
+}
+
+// pemBytes returns the inline value, or the file's contents, or an error when
+// neither is set.
+func pemBytes(inline, file string) ([]byte, error) {
+	switch {
+	case inline != "":
+		return []byte(inline), nil
+	case file != "":
+		return os.ReadFile(file)
+	default:
+		return nil, errors.New("required (give it inline or as a *_file path)")
+	}
 }
 
 type AgentAuth struct {
@@ -72,8 +111,17 @@ func (c Config) Validate() error {
 	if c.Listen.GRPC.Addr == "" {
 		return errors.New("listen.grpc.addr is required")
 	}
-	if c.Listen.GRPC.CertFile == "" || c.Listen.GRPC.KeyFile == "" {
-		return errors.New("listen.grpc.cert_file and key_file are required")
+	if c.Listen.GRPC.Cert == "" && c.Listen.GRPC.CertFile == "" {
+		return errors.New("listen.grpc: a certificate is required (cert or cert_file)")
+	}
+	if c.Listen.GRPC.Key == "" && c.Listen.GRPC.KeyFile == "" {
+		return errors.New("listen.grpc: a key is required (key or key_file)")
+	}
+	if c.Listen.GRPC.Cert != "" && c.Listen.GRPC.CertFile != "" {
+		return errors.New("listen.grpc: set only one of cert or cert_file")
+	}
+	if c.Listen.GRPC.Key != "" && c.Listen.GRPC.KeyFile != "" {
+		return errors.New("listen.grpc: set only one of key or key_file")
 	}
 	if c.Listen.HTTP == "" {
 		return errors.New("listen.http is required")

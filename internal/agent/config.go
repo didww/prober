@@ -51,6 +51,16 @@ type BackendConfig struct {
 	// never set it in production. The agent logs a warning when it is on.
 	InsecureSkipVerify bool `yaml:"insecure_skip_verify"`
 
+	// SkipHostnameVerify checks that the backend's certificate chains to the
+	// trusted CA and is in date, but does NOT check its SAN against the dialled
+	// address. Use it when the agent reaches the backend by a name that is not
+	// in the certificate — a Kubernetes Service name, or an internal address —
+	// while the CA still proves it is the right backend. It is a middle ground:
+	// weaker than full verification (any host with a CA-signed certificate is
+	// accepted), much stronger than insecure_skip_verify (which trusts any
+	// certificate at all).
+	SkipHostnameVerify bool `yaml:"skip_hostname_verify"`
+
 	// DialTimeout bounds the initial connection. Zero means 10s.
 	DialTimeout time.Duration `yaml:"dial_timeout"`
 }
@@ -117,7 +127,11 @@ func (c BackendConfig) tlsConfig() (*tls.Config, error) {
 	case c.CA != "":
 		pem = []byte(c.CA)
 	default:
-		return cfg, nil // system roots
+		// System roots. Still honour SkipHostnameVerify against them.
+		if c.SkipHostnameVerify {
+			applyHostnameSkip(cfg)
+		}
+		return cfg, nil
 	}
 
 	pool := x509.NewCertPool()
@@ -129,7 +143,30 @@ func (c BackendConfig) tlsConfig() (*tls.Config, error) {
 		return nil, fmt.Errorf("backend: %s contained no valid PEM certificate", src)
 	}
 	cfg.RootCAs = pool
+	if c.SkipHostnameVerify {
+		applyHostnameSkip(cfg)
+	}
 	return cfg, nil
+}
+
+// applyHostnameSkip makes cfg verify the chain to cfg.RootCAs (or the system
+// roots when nil) and the validity dates, but not the hostname. Go has no flag
+// for this, so it turns off the built-in verification and does the chain check
+// itself in VerifyConnection, leaving out VerifyOptions.DNSName.
+func applyHostnameSkip(cfg *tls.Config) {
+	roots := cfg.RootCAs
+	cfg.InsecureSkipVerify = true // disables the default hostname+chain check
+	cfg.VerifyConnection = func(cs tls.ConnectionState) error {
+		if len(cs.PeerCertificates) == 0 {
+			return errors.New("backend presented no certificate")
+		}
+		opts := x509.VerifyOptions{Roots: roots, Intermediates: x509.NewCertPool()}
+		for _, c := range cs.PeerCertificates[1:] {
+			opts.Intermediates.AddCert(c)
+		}
+		_, err := cs.PeerCertificates[0].Verify(opts)
+		return err
+	}
 }
 
 // Validate reports whether this config could start, without dialing. Secret

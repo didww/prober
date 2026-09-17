@@ -122,7 +122,7 @@ func (s *Server) Run(ctx context.Context) error {
 }
 
 func (s *Server) grpcServer() (*grpc.Server, error) {
-	cert, err := tls.LoadX509KeyPair(s.cfg.Listen.GRPC.CertFile, s.cfg.Listen.GRPC.KeyFile)
+	cert, err := s.cfg.Listen.GRPC.certificate()
 	if err != nil {
 		return nil, err
 	}

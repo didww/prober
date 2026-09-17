@@ -4,6 +4,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
@@ -172,5 +173,88 @@ func TestValidate(t *testing.T) {
 	}
 	if err := (BackendConfig{Address: "b:1", Site: "fra"}).Validate(); err == nil {
 		t.Fatal("missing token must fail")
+	}
+}
+
+// mkLeaf makes a CA and a server cert signed by it with the given SAN.
+func mkLeaf(t *testing.T, san string) (caPEMStr string, serverCert tls.Certificate) {
+	t.Helper()
+	caKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	caTmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "test-ca"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		IsCA: true, KeyUsage: x509.KeyUsageCertSign, BasicConstraintsValid: true,
+	}
+	caDER, _ := x509.CreateCertificate(rand.Reader, caTmpl, caTmpl, &caKey.PublicKey, caKey)
+	caPEMStr = string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER}))
+
+	srvKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	srvTmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: san},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		DNSNames: []string{san}, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	caCert, _ := x509.ParseCertificate(caDER)
+	srvDER, _ := x509.CreateCertificate(rand.Reader, srvTmpl, caCert, &srvKey.PublicKey, caKey)
+	serverCert = tls.Certificate{Certificate: [][]byte{srvDER}, PrivateKey: srvKey}
+	return
+}
+
+// handshake dials a TLS server presenting serverCert, with the given client
+// config, over a loopback listener. Returns the client's handshake error.
+func handshake(t *testing.T, clientCfg *tls.Config, serverCert tls.Certificate) error {
+	t.Helper()
+	ln, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{serverCert}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		_ = c.(*tls.Conn).Handshake()
+		c.Close()
+	}()
+	conn, err := tls.Dial("tcp", ln.Addr().String(), clientCfg)
+	if err != nil {
+		return err
+	}
+	conn.Close()
+	return nil
+}
+
+func TestSkipHostnameVerify(t *testing.T) {
+	ca, serverCert := mkLeaf(t, "the-real-name") // cert is for "the-real-name"
+
+	// Full verification against a DIFFERENT dialled name fails on the hostname.
+	full := BackendConfig{Address: "svc:1", Site: "fra", Token: "t", CA: ca, ServerName: "k8s-service-name"}
+	cfg, err := full.tlsConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if handshake(t, cfg, serverCert) == nil {
+		t.Fatal("full verification must reject a name not in the certificate")
+	}
+
+	// skip_hostname_verify: the same mismatch is accepted, because the chain to
+	// the CA is what is checked, not the name.
+	skip := BackendConfig{Address: "svc:1", Site: "fra", Token: "t", CA: ca, ServerName: "k8s-service-name", SkipHostnameVerify: true}
+	cfg, err = skip.tlsConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := handshake(t, cfg, serverCert); err != nil {
+		t.Fatalf("skip_hostname_verify must accept a CA-signed cert regardless of name: %v", err)
+	}
+
+	// But a cert signed by a DIFFERENT CA is still rejected — the chain check
+	// remains.
+	otherCA, _ := mkLeaf(t, "the-real-name")
+	skipOther := BackendConfig{Address: "svc:1", Site: "fra", Token: "t", CA: otherCA, SkipHostnameVerify: true}
+	cfg, _ = skipOther.tlsConfig()
+	if handshake(t, cfg, serverCert) == nil {
+		t.Fatal("skip_hostname_verify must still reject a cert that does not chain to the trusted CA")
 	}
 }

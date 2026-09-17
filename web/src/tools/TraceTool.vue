@@ -12,7 +12,7 @@ const form = reactive({
   target: '',
   protocol: 'icmp' as Protocol,
   family: '' as Family,
-  port: 0,
+  port: undefined as number | undefined,
   mode: 'mtr' as Mode,
   cycles: 30,
   resolve: true,

@@ -98,6 +98,7 @@ message StartJob {
   string job_id = 1;
   oneof spec {
     TraceSpec trace = 10;
+    SipOptionsSpec sip_options = 11;
   }
 }
 
@@ -186,6 +187,56 @@ message TraceSpec {
   uint32 probe_timeout_ms = 14;
 }
 
+// --- SIP OPTIONS probe --------------------------------------------------------
+
+enum SipTransport {
+  SIP_TRANSPORT_UNSPECIFIED = 0;
+  SIP_TRANSPORT_UDP = 1;
+  SIP_TRANSPORT_TCP = 2;
+  SIP_TRANSPORT_TLS = 3;
+  SIP_TRANSPORT_WSS = 4;
+}
+
+// SipOptionsSpec is a repeated SIP OPTIONS reachability probe. Exactly one
+// request is sent per cycle (no retransmission), so N cycles is N requests and
+// a lost packet shows as a timeout rather than being masked.
+message SipOptionsSpec {
+  string target = 1;
+  // Destination port; 0 means the transport default (5060 udp/tcp, 5061 tls,
+  // 443 wss).
+  uint32 port = 2;
+  SipTransport transport = 3;
+  AddressFamily family = 4;
+  // Number of OPTIONS to send; 0 means until the run is stopped.
+  uint32 cycles = 5;
+  uint32 interval_ms = 6;
+  // How long to wait for a response before the cycle counts as a timeout.
+  uint32 timeout_ms = 7;
+  // Source address to send from; empty picks the routing default.
+  string source = 8;
+  // User-Agent header value; empty uses the agent default.
+  string user_agent = 9;
+}
+
+// SipResult is one cycle's outcome.
+message SipResult {
+  uint32 cycle = 1;
+  // The SIP status code, or 0 when no response arrived (timeout).
+  uint32 status_code = 2;
+  string reason = 3;
+  optional uint32 rtt_us = 4;
+  bool responded = 5;
+  // The raw request and response text, for the expanded row.
+  string request = 6;
+  string response = 7;
+  // TLS validity, for the tls and wss transports. tls is true when a TLS
+  // transport was used; tls_valid is whether the server certificate chained to
+  // a trusted root and matched the name; tls_error says why not, for a warning.
+  bool tls = 8;
+  bool tls_valid = 9;
+  string tls_error = 10;
+}
+
 // JobEvent is anything an agent reports about a job. Every event carries the
 // agent's clock and a per-agent monotonic sequence, so the backend can store
 // or deduplicate events without state about the job.
@@ -198,6 +249,7 @@ message JobEvent {
     Cycle cycle = 11;
     JobFinished finished = 12;
     JobError error = 13;
+    SipResult sip_result = 14;
   }
 }
 
@@ -210,6 +262,8 @@ message JobStarted {
   string source = 3;
   Protocol protocol = 4;
   AddressFamily family = 5;
+  // For SIP: the transport used (udp/tcp/tls/wss). Empty for trace.
+  string transport = 6;
 }
 
 // Cycle is emitted once per cycle with every hop's sample and its running

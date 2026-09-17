@@ -58,6 +58,7 @@ func (a *API) Routes() http.Handler {
 		r.Get("/probers", a.probers)
 		r.Get("/agents", a.agents)
 		r.Post("/runs", a.startRun)
+		r.Post("/sip-runs", a.startSipRun)
 		r.Get("/runs/{id}/events", a.runEvents)
 		r.Delete("/runs/{id}", a.cancelRun)
 	})
@@ -194,7 +195,55 @@ func (a *API) startRun(w http.ResponseWriter, r *http.Request) {
 		Cycles:       req.Cycles,
 		Mode:         modeOf(req.Mode),
 	}
-	run := a.mgr.Start(spec, sites)
+	run := a.mgr.Start(func(jobID string) *pb.StartJob {
+		return &pb.StartJob{JobId: jobID, Spec: &pb.StartJob_Trace{Trace: spec}}
+	}, sites)
+	writeJSON(w, http.StatusCreated, map[string]any{"id": run.ID, "sites": sites})
+}
+
+type sipStartRequest struct {
+	Target     string   `json:"target"`
+	Sites      []string `json:"sites"`
+	Transport  string   `json:"transport"`
+	Family     string   `json:"family"`
+	Port       uint32   `json:"port"`
+	Cycles     uint32   `json:"cycles"`
+	IntervalMS uint32   `json:"interval_ms"`
+	TimeoutMS  uint32   `json:"timeout_ms"`
+}
+
+func (a *API) startSipRun(w http.ResponseWriter, r *http.Request) {
+	var req sipStartRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if req.Target == "" {
+		writeErr(w, http.StatusBadRequest, "target is required")
+		return
+	}
+	sites := req.Sites
+	if len(sites) == 0 {
+		for _, h := range a.gw.Sites() {
+			sites = append(sites, h.Site)
+		}
+	}
+	if len(sites) == 0 {
+		writeErr(w, http.StatusServiceUnavailable, "no agents connected")
+		return
+	}
+	spec := &pb.SipOptionsSpec{
+		Target:     req.Target,
+		Port:       req.Port,
+		Transport:  sipTransportOf(req.Transport),
+		Family:     familyOf(req.Family),
+		Cycles:     req.Cycles,
+		IntervalMs: req.IntervalMS,
+		TimeoutMs:  req.TimeoutMS,
+	}
+	run := a.mgr.Start(func(jobID string) *pb.StartJob {
+		return &pb.StartJob{JobId: jobID, Spec: &pb.StartJob_SipOptions{SipOptions: spec}}
+	}, sites)
 	writeJSON(w, http.StatusCreated, map[string]any{"id": run.ID, "sites": sites})
 }
 
@@ -301,4 +350,17 @@ func modeOf(s string) pb.TraceMode {
 		return pb.TraceMode_TRACE_MODE_PING
 	}
 	return pb.TraceMode_TRACE_MODE_MTR
+}
+
+func sipTransportOf(s string) pb.SipTransport {
+	switch s {
+	case "tcp":
+		return pb.SipTransport_SIP_TRANSPORT_TCP
+	case "tls":
+		return pb.SipTransport_SIP_TRANSPORT_TLS
+	case "wss":
+		return pb.SipTransport_SIP_TRANSPORT_WSS
+	default:
+		return pb.SipTransport_SIP_TRANSPORT_UDP
+	}
 }

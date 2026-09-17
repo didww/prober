@@ -300,22 +300,20 @@ func (g *Gateway) Connected(site string) bool {
 	return g.agents[site] != nil
 }
 
-// StartJob dispatches a job to a site's agent and registers where its events
-// go. It fails if the site has no connected agent.
-func (g *Gateway) StartJob(site, jobID string, spec *pb.TraceSpec, sink EventSink) error {
+// StartJob dispatches a pre-built job to a site's agent and registers where its
+// events go. The job's spec (trace, SIP, …) is set by the caller. It fails if
+// the site has no connected agent.
+func (g *Gateway) StartJob(site string, job *pb.StartJob, sink EventSink) error {
 	g.mu.Lock()
 	conn := g.agents[site]
 	if conn == nil {
 		g.mu.Unlock()
 		return errors.New("site not connected")
 	}
-	g.sinks[jobID] = sink
+	g.sinks[job.JobId] = sink
 	g.mu.Unlock()
 
-	return conn.send(&pb.BackendMessage{Msg: &pb.BackendMessage_Start{Start: &pb.StartJob{
-		JobId: jobID,
-		Spec:  &pb.StartJob_Trace{Trace: spec},
-	}}})
+	return conn.send(&pb.BackendMessage{Msg: &pb.BackendMessage_Start{Start: job}})
 }
 
 // CancelJob asks a site's agent to stop a job.

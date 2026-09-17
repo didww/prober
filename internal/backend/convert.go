@@ -25,6 +25,7 @@ func eventJSON(se *StreamEvent) ([]byte, string, []byte) {
 		out["source"] = e.Started.Source
 		out["protocol"] = e.Started.Protocol.String()
 		out["family"] = e.Started.Family.String()
+		out["transport"] = e.Started.Transport
 	case *pb.JobEvent_Cycle:
 		typ = "cycle"
 		out["number"] = e.Cycle.Number
@@ -38,6 +39,23 @@ func eventJSON(se *StreamEvent) ([]byte, string, []byte) {
 		typ = "error"
 		out["code"] = e.Error.Code.String()
 		out["message"] = e.Error.Message
+	case *pb.JobEvent_SipResult:
+		typ = "sip_result"
+		r := e.SipResult
+		out["cycle"] = r.Cycle
+		out["status_code"] = r.StatusCode
+		out["reason"] = r.Reason
+		out["responded"] = r.Responded
+		out["request"] = r.Request
+		out["response"] = r.Response
+		out["tls"] = r.Tls
+		out["tls_valid"] = r.TlsValid
+		out["tls_error"] = r.TlsError
+		if r.RttUs != nil {
+			out["rtt_us"] = *r.RttUs
+		} else {
+			out["rtt_us"] = nil
+		}
 	default:
 		typ = "unknown"
 	}

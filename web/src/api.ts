@@ -101,22 +101,73 @@ export async function cancelRun(id: string): Promise<void> {
   await fetch(apiURL(`runs/${id}`), { method: 'DELETE', credentials: 'same-origin' })
 }
 
+// --- SIP OPTIONS ------------------------------------------------------------
+
+export type SipTransport = 'udp' | 'tcp' | 'tls' | 'wss'
+
+export interface SipStartRequest {
+  target: string
+  sites: string[]
+  transport: SipTransport
+  family: Family
+  port?: number
+  cycles: number
+  interval_ms: number
+  timeout_ms?: number
+}
+
+export type SipRunEvent =
+  | { type: 'started'; seq: number; site: string; target: string; resolved: string; source: string; transport: string; family: string }
+  | {
+      type: 'sip_result'
+      seq: number
+      site: string
+      cycle: number
+      status_code: number
+      reason: string
+      rtt_us: number | null
+      responded: boolean
+      request: string
+      response: string
+      tls: boolean
+      tls_valid: boolean
+      tls_error: string
+    }
+  | { type: 'finished'; seq: number; site: string; reason: string }
+  | { type: 'error'; seq: number; site: string; code: string; message: string }
+
+export async function startSipRun(req: SipStartRequest): Promise<{ id: string; sites: string[] }> {
+  const res = await check(
+    await fetch(apiURL('sip-runs'), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(req),
+      credentials: 'same-origin',
+    }),
+  )
+  return res.json()
+}
+
 // subscribe opens the run's SSE stream. The browser reconnects on its own and
 // sends Last-Event-ID, so the backend replays what was missed.
-export function subscribe(
+// subscribe opens a run's SSE stream, registering listeners for the given
+// event names and passing each parsed payload to onEvent. Generic over the
+// event type so trace and SIP keep separate unions.
+export function subscribe<T>(
   id: string,
-  onEvent: (ev: RunEvent) => void,
+  eventNames: string[],
+  onEvent: (ev: T) => void,
   onDone: () => void,
 ): EventSource {
   const es = new EventSource(apiURL(`runs/${id}/events`), { withCredentials: true })
   const handle = (e: MessageEvent) => {
     try {
-      onEvent(JSON.parse(e.data) as RunEvent)
+      onEvent(JSON.parse(e.data) as T)
     } catch {
       /* a frame we cannot parse is one event lost; the stream continues */
     }
   }
-  for (const t of ['started', 'cycle', 'finished', 'error']) {
+  for (const t of eventNames) {
     es.addEventListener(t, handle as EventListener)
   }
   es.addEventListener('done', () => {

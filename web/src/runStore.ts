@@ -102,8 +102,9 @@ export function createRun(): {
     reset(sites)
     state.id = id
     state.running = true
-    es = subscribe(
+    es = subscribe<RunEvent>(
       id,
+      ['started', 'cycle', 'finished', 'error'],
       apply,
       () => {
         state.running = false

@@ -136,15 +136,12 @@ function statusLabel(s: SiteState): string {
       </div>
 
       <template v-for="s in rows" :key="s.site">
-        <div
+        <button
+          type="button"
           class="row"
           :class="s.status"
-          role="button"
-          tabindex="0"
           :aria-expanded="s.expanded"
           @click="s.expanded = !s.expanded"
-          @keydown.enter="s.expanded = !s.expanded"
-          @keydown.space.prevent="s.expanded = !s.expanded"
         >
           <span class="c-site"><span class="caret" :class="{ open: s.expanded }">▶</span>{{ s.site }}</span>
           <span class="c-ip">
@@ -163,7 +160,7 @@ function statusLabel(s: SiteState): string {
                     :title="c.rtt == null ? 'timeout' : ms(c.rtt) + ' ms (' + c.code + ')'" />
             </span>
           </span>
-        </div>
+        </button>
 
         <div v-if="s.expanded" class="detail">
           <div v-if="s.error" class="err">{{ s.error }}</div>
@@ -225,7 +222,17 @@ function statusLabel(s: SiteState): string {
   align-items: center; gap: 8px; padding: 6px 8px;
 }
 .head { color: var(--fg-dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; border-bottom: 1px solid var(--line); }
-.row { border-bottom: 1px solid var(--line); cursor: pointer; }
+.row {
+  appearance: none;
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
 .row:hover { background: var(--hover); }
 .row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .c-n { text-align: right; font-variant-numeric: tabular-nums; }

@@ -168,15 +168,12 @@ async function copyReport(s: SiteState) {
       </div>
 
       <template v-for="s in rows" :key="s.site">
-        <div
+        <button
+          type="button"
           class="row"
           :class="s.status"
-          role="button"
-          tabindex="0"
           :aria-expanded="s.expanded"
           @click="s.expanded = !s.expanded"
-          @keydown.enter="s.expanded = !s.expanded"
-          @keydown.space.prevent="s.expanded = !s.expanded"
         >
           <span class="c-site">
             <span class="caret" :class="{ open: s.expanded }">▶</span>{{ s.site }}
@@ -208,7 +205,7 @@ async function copyReport(s: SiteState) {
               />
             </span>
           </span>
-        </div>
+        </button>
 
         <div v-if="s.expanded" class="hops">
           <div v-if="s.error" class="err">{{ s.error }}</div>
@@ -332,7 +329,14 @@ async function copyReport(s: SiteState) {
   border-bottom: 1px solid var(--line);
 }
 .row {
+  appearance: none;
+  width: 100%;
+  border: 0;
   border-bottom: 1px solid var(--line);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
 }
 .row:hover { background: var(--hover); }

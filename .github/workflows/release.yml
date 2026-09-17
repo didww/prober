@@ -15,7 +15,19 @@ jobs:
   deb:
     name: Debian packages
     runs-on: ubuntu-latest
+    # In a root container, not on the bare runner: upload-debian-pkg-action runs
+    # `apt install ruby gnupg` with no sudo, which fails on the dpkg lock as the
+    # unprivileged `runner` user. A container job runs as root, and gives us
+    # dpkg-deb from a trixie userland — the same reason vlui does this.
+    container:
+      image: debian:trixie
     steps:
+      # A bare debian image lacks what the checkout/setup actions assume.
+      - name: Install build prerequisites
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates xz-utils
+
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:

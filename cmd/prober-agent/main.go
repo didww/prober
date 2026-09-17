@@ -70,7 +70,7 @@ func run() error {
 	defer stop()
 
 	log.Info("prober-agent starting", "version", version, "commit", commit, "site", cfg.Backend.Site)
-	a, err := agent.New(cfg, log)
+	a, err := agent.New(cfg, log, agent.BuildInfo{Version: version, Commit: commit})
 	if err != nil {
 		return err
 	}

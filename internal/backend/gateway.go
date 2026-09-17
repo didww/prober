@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"sync"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -59,9 +60,10 @@ func NewGateway(cfg Config, log *slog.Logger) *Gateway {
 // agentConn is one connected agent. send is serialised because gRPC streams
 // are not safe for concurrent Send.
 type agentConn struct {
-	site   string
-	hello  *pb.Hello
-	stream pb.AgentGateway_SessionServer
+	site        string
+	hello       *pb.Hello
+	stream      pb.AgentGateway_SessionServer
+	connectedAt time.Time
 
 	sendMu sync.Mutex
 }
@@ -143,7 +145,7 @@ func (g *Gateway) Session(stream pb.AgentGateway_SessionServer) error {
 		return err
 	}
 
-	conn := &agentConn{site: site, hello: hello, stream: stream}
+	conn := &agentConn{site: site, hello: hello, stream: stream, connectedAt: time.Now()}
 	g.addAgent(conn)
 	defer g.removeAgent(site, conn)
 
@@ -213,6 +215,24 @@ func (g *Gateway) Sites() []*pb.Hello {
 	out := make([]*pb.Hello, 0, len(g.agents))
 	for _, c := range g.agents {
 		out = append(out, c.hello)
+	}
+	return out
+}
+
+// AgentInfo is a connected agent's Hello plus when its session connected.
+type AgentInfo struct {
+	Hello       *pb.Hello
+	ConnectedAt time.Time
+}
+
+// Agents returns every connected agent with its connection time, for the
+// agents page.
+func (g *Gateway) Agents() []AgentInfo {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	out := make([]AgentInfo, 0, len(g.agents))
+	for _, c := range g.agents {
+		out = append(out, AgentInfo{Hello: c.hello, ConnectedAt: c.connectedAt})
 	}
 	return out
 }

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"net/netip"
+	"os"
 	"sync"
 	"time"
 
@@ -52,19 +53,27 @@ func (l Limits) withDefaults() Limits {
 
 // Agent connects to the backend and runs the jobs it sends.
 type Agent struct {
-	cfg    Config
-	log    *slog.Logger
-	engine *trace.Engine
-	token  string
-	tls    credentials.TransportCredentials
+	cfg      Config
+	log      *slog.Logger
+	engine   *trace.Engine
+	token    string
+	tls      credentials.TransportCredentials
+	started  time.Time // process start, reported as uptime
+	version  string
+	commit   string
+	hostname string
+	sources  []string // egress source addresses, computed once at startup
 
 	seq  sequence
 	jobs jobTable
 }
 
+// BuildInfo is the version/commit the main package linked in.
+type BuildInfo struct{ Version, Commit string }
+
 // New builds an agent, opening the engine's raw sockets and reading the
 // backend secrets. It does not dial: Run does, with reconnect.
-func New(cfg Config, log *slog.Logger) (*Agent, error) {
+func New(cfg Config, log *slog.Logger, build BuildInfo) (*Agent, error) {
 	cfg.Limits = cfg.Limits.withDefaults()
 	if err := cfg.Backend.Validate(); err != nil {
 		return nil, err
@@ -86,14 +95,43 @@ func New(cfg Config, log *slog.Logger) (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Agent{
-		cfg:    cfg,
-		log:    log,
-		engine: eng,
-		token:  token,
-		tls:    credentials.NewTLS(tlsCfg),
-		jobs:   jobTable{m: map[string]context.CancelFunc{}},
-	}, nil
+	host, _ := os.Hostname()
+	a := &Agent{
+		cfg:      cfg,
+		log:      log,
+		engine:   eng,
+		token:    token,
+		tls:      credentials.NewTLS(tlsCfg),
+		started:  time.Now(),
+		version:  build.Version,
+		commit:   build.Commit,
+		hostname: host,
+		sources:  egressSources(eng.Capabilities()),
+		jobs:     jobTable{m: map[string]context.CancelFunc{}},
+	}
+	if len(a.sources) > 0 {
+		log.Info("egress source addresses", "sources", a.sources)
+	}
+	return a, nil
+}
+
+// egressSources reports the addresses this host would send probes from, one per
+// available family, by asking the routing (a UDP dial, no packets sent) for the
+// source it would use to reach a public target. Best effort: an unroutable
+// family is simply omitted.
+func egressSources(caps trace.Capabilities) []string {
+	var out []string
+	if caps.IPv4 {
+		if a := dialSource(netip.MustParseAddr("1.1.1.1"), 443); a.IsValid() {
+			out = append(out, a.String())
+		}
+	}
+	if caps.IPv6 {
+		if a := dialSource(netip.MustParseAddr("2606:4700:4700::1111"), 443); a.IsValid() {
+			out = append(out, a.String())
+		}
+	}
+	return out
 }
 
 func (a *Agent) Close() error { return a.engine.Close() }
@@ -101,21 +139,32 @@ func (a *Agent) Close() error { return a.engine.Close() }
 // Run keeps a session to the backend up, reconnecting with backoff, until
 // ctx is cancelled.
 func (a *Agent) Run(ctx context.Context) error {
-	backoff := time.Second
+	const minBackoff = time.Second
+	const maxBackoff = 30 * time.Second
+	// A session that stayed up this long counts as healthy, so its drop
+	// reconnects promptly instead of inheriting the backoff that earlier
+	// failures grew. Short-lived sessions (a rejected token, a backend that
+	// accepts then drops) keep backing off, so a broken pairing does not hammer.
+	const healthy = 5 * time.Second
+
+	backoff := minBackoff
 	for {
+		start := time.Now()
 		err := a.session(ctx)
 		if ctx.Err() != nil {
 			return nil
 		}
-		a.log.Warn("session ended, reconnecting", "err", err, "in", backoff)
+		lasted := time.Since(start)
+		if lasted >= healthy {
+			backoff = minBackoff
+		}
+		a.log.Warn("session ended, reconnecting", "err", err, "lasted", lasted.Round(time.Second), "in", backoff)
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-time.After(backoff):
 		}
-		if backoff *= 2; backoff > 30*time.Second {
-			backoff = 30 * time.Second
-		}
+		backoff = min(backoff*2, maxBackoff)
 	}
 }
 
@@ -198,9 +247,13 @@ func (a *Agent) hello() *pb.Hello {
 	caps := a.engine.Capabilities()
 	return &pb.Hello{
 		Site:      a.cfg.Backend.Site,
-		StartedAt: timestamppb.Now(),
+		Version:   a.version,
+		Commit:    a.commit,
+		Hostname:  a.hostname,
+		StartedAt: timestamppb.New(a.started),
 		Capabilities: &pb.Capabilities{
 			Ipv4: caps.IPv4, Ipv6: caps.IPv6, Icmp: true, Udp: true, Tcp: true,
+			SourceAddresses: a.sources,
 		},
 		Limits: &pb.Limits{
 			MaxConcurrentJobs: uint32(a.cfg.Limits.MaxConcurrentJobs),

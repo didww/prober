@@ -54,6 +54,7 @@ func (a *API) Routes() http.Handler {
 			r.Use(a.auth.Middleware)
 		}
 		r.Get("/probers", a.probers)
+		r.Get("/agents", a.agents)
 		r.Post("/runs", a.startRun)
 		r.Get("/runs/{id}/events", a.runEvents)
 		r.Delete("/runs/{id}", a.cancelRun)
@@ -98,6 +99,42 @@ func (a *API) probers(w http.ResponseWriter, r *http.Request) {
 			p.IPv4, p.IPv6 = c.Ipv4, c.Ipv6
 		}
 		out = append(out, p)
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// agents is the detailed view for the Agents page: every connected agent with
+// version, hostname, uptime and connection time, and the source addresses its
+// probes leave from.
+func (a *API) agents(w http.ResponseWriter, r *http.Request) {
+	type agent struct {
+		Site        string   `json:"site"`
+		Version     string   `json:"version"`
+		Commit      string   `json:"commit"`
+		Hostname    string   `json:"hostname"`
+		IPv4        bool     `json:"ipv4"`
+		IPv6        bool     `json:"ipv6"`
+		Sources     []string `json:"sources"`
+		StartedAt   string   `json:"started_at"`
+		ConnectedAt string   `json:"connected_at"`
+	}
+	out := []agent{}
+	for _, info := range a.gw.Agents() {
+		h := info.Hello
+		ag := agent{
+			Site:        h.Site,
+			Version:     h.Version,
+			Commit:      h.Commit,
+			Hostname:    h.Hostname,
+			ConnectedAt: info.ConnectedAt.UTC().Format(time.RFC3339),
+		}
+		if c := h.Capabilities; c != nil {
+			ag.IPv4, ag.IPv6, ag.Sources = c.Ipv4, c.Ipv6, c.SourceAddresses
+		}
+		if h.StartedAt != nil {
+			ag.StartedAt = h.StartedAt.AsTime().UTC().Format(time.RFC3339)
+		}
+		out = append(out, ag)
 	}
 	writeJSON(w, http.StatusOK, out)
 }

@@ -42,3 +42,19 @@ export function clockTime(ms: number): string {
     hour12: hour12.value,
   })
 }
+
+// A compact human duration from an ISO timestamp to now: "3d 4h", "12m", "45s".
+export function since(iso: string, now = Date.now()): string {
+  if (!iso) return '—'
+  const ms = now - new Date(iso).getTime()
+  if (!isFinite(ms) || ms < 0) return '—'
+  const s = Math.floor(ms / 1000)
+  const d = Math.floor(s / 86400)
+  const h = Math.floor((s % 86400) / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = s % 60
+  if (d > 0) return `${d}d ${h}h`
+  if (h > 0) return `${h}h ${m}m`
+  if (m > 0) return `${m}m ${sec}s`
+  return `${sec}s`
+}

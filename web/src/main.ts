@@ -2,6 +2,7 @@ import { createApp } from 'vue'
 import { createRouter, createWebHistory } from 'vue-router'
 import App from './App.vue'
 import TraceTool from './tools/TraceTool.vue'
+import AgentsTool from './tools/AgentsTool.vue'
 import { initTheme } from './theme'
 import { BASE } from './base'
 import { loadConfig } from './session'
@@ -16,6 +17,7 @@ const router = createRouter({
   routes: [
     { path: '/', redirect: '/trace' },
     { path: '/trace', component: TraceTool },
+    { path: '/agents', component: AgentsTool },
   ],
 })
 

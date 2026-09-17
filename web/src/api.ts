@@ -17,6 +17,18 @@ export interface Prober {
   ipv6: boolean
 }
 
+export interface Agent {
+  site: string
+  version: string
+  commit: string
+  hostname: string
+  ipv4: boolean
+  ipv6: boolean
+  sources: string[]
+  started_at: string
+  connected_at: string
+}
+
 export type Protocol = 'icmp' | 'udp' | 'tcp'
 export type Family = '' | '4' | '6'
 export type Mode = 'mtr' | 'ping'
@@ -66,6 +78,10 @@ export async function getVersion(): Promise<Build> {
 
 export async function listProbers(): Promise<Prober[]> {
   return (await getJSON<Prober[] | null>('probers')) ?? []
+}
+
+export async function listAgents(): Promise<Agent[]> {
+  return (await getJSON<Agent[] | null>('agents')) ?? []
 }
 
 export async function startRun(req: StartRequest): Promise<{ id: string; sites: string[] }> {

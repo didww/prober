@@ -64,9 +64,9 @@ onBeforeUnmount(() => {
           <td class="r mono">{{ since(a.started_at, now) }}</td>
           <td class="r mono">{{ since(a.connected_at, now) }}</td>
           <td class="mono">
-            <template v-if="a.sources && a.sources.length">
+            <div v-if="a.sources && a.sources.length" class="srcs">
               <span v-for="s in a.sources" :key="s" class="src">{{ s }}</span>
-            </template>
+            </div>
             <span v-else class="dim">—</span>
           </td>
         </tr>
@@ -91,6 +91,7 @@ h1 { font-size: 16px; margin: 0; }
 .dim { color: var(--fg-dim); }
 .mono { font-variant-numeric: tabular-nums; }
 .fam { display: inline-block; margin-right: 4px; padding: 1px 6px; border: 1px solid var(--line); border-radius: 999px; font-size: 11px; color: var(--fg-dim); }
-.src { display: inline-block; margin-right: 8px; }
+.srcs { display: flex; flex-direction: column; gap: 2px; }
+.src { display: block; }
 .hint { color: var(--fg-dim); padding: 30px 0; text-align: center; }
 </style>

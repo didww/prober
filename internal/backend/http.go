@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -100,6 +102,7 @@ func (a *API) probers(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, p)
 	}
+	slices.SortFunc(out, func(a, b prober) int { return strings.Compare(a.Site, b.Site) })
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -136,6 +139,12 @@ func (a *API) agents(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, ag)
 	}
+	slices.SortFunc(out, func(a, b agent) int {
+		if c := strings.Compare(a.Site, b.Site); c != 0 {
+			return c
+		}
+		return strings.Compare(a.Hostname, b.Hostname)
+	})
 	writeJSON(w, http.StatusOK, out)
 }
 

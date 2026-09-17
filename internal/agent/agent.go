@@ -263,6 +263,9 @@ func (a *Agent) session(ctx context.Context) error {
 			a.startJob(sessCtx, m.Start, send)
 		case *pb.BackendMessage_Cancel:
 			a.jobs.cancel(m.Cancel.JobId)
+		case *pb.BackendMessage_Ping:
+			// Echo at once so the backend can measure the round trip.
+			_ = send(&pb.AgentMessage{Msg: &pb.AgentMessage_Pong{Pong: &pb.Pong{Nonce: m.Ping.Nonce}}})
 		}
 	}
 }

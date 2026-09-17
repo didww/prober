@@ -25,8 +25,13 @@ jobs:
       - name: Unit tests
         run: go test ./...
 
-      # The engine's integration tests need raw ICMP sockets. GitHub's runners
-      # allow unprivileged user namespaces, so the tests run as root inside one
-      # with a network namespace of their own — no host capability needed.
+      # The engine's integration tests need raw ICMP sockets. They run as root
+      # inside an unprivileged user + network namespace — no host capability
+      # needed. Ubuntu 24.04 (ubuntu-latest) restricts unprivileged user
+      # namespaces via AppArmor, so lift that restriction first; the '|| true'
+      # keeps this working on kernels without the knob.
+      - name: Allow unprivileged user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+
       - name: Engine integration tests (raw sockets in a namespace)
         run: unshare -Urn sh -c 'ip link set lo up && go test -count=1 ./internal/trace/...'

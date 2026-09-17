@@ -5,6 +5,7 @@
 import { onMounted, onBeforeUnmount, ref } from 'vue'
 import { listAgents, type Agent } from '../api'
 import { since } from '../settings'
+import { ms } from '../format'
 
 const agents = ref<Agent[]>([])
 const loaded = ref(false)
@@ -45,6 +46,7 @@ onBeforeUnmount(() => {
           <th>Host</th>
           <th>Version</th>
           <th>Families</th>
+          <th class="r">Latency</th>
           <th class="r">Uptime</th>
           <th class="r">Connected</th>
           <th>Source addresses</th>
@@ -61,6 +63,7 @@ onBeforeUnmount(() => {
             <span v-if="a.ipv4" class="fam">IPv4</span>
             <span v-if="a.ipv6" class="fam">IPv6</span>
           </td>
+          <td class="r mono">{{ a.rtt_us != null ? ms(a.rtt_us) + ' ms' : '—' }}</td>
           <td class="r mono">{{ since(a.started_at, now) }}</td>
           <td class="r mono">{{ since(a.connected_at, now) }}</td>
           <td class="mono">

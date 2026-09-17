@@ -12,7 +12,7 @@ const form = reactive({
   target: '',
   protocol: 'icmp' as Protocol,
   family: '' as Family,
-  port: 0,
+  port: undefined as number | undefined,
   mode: 'mtr' as Mode,
   cycles: 30,
   resolve: true,
@@ -98,20 +98,24 @@ async function copyReport(s: SiteState) {
 <template>
   <div class="trace">
     <form class="bar" @submit.prevent="submit">
+      <label for="trace-target" class="sr-only">Target host or IP</label>
       <input
+        id="trace-target"
         v-model="form.target"
         class="ctl target"
         placeholder="host or IP to trace"
-        autofocus
         spellcheck="false"
       />
-      <select v-model="form.protocol" class="ctl">
+      <label for="trace-protocol" class="sr-only">Protocol</label>
+      <select id="trace-protocol" v-model="form.protocol" class="ctl">
         <option value="icmp">ICMP</option>
         <option value="tcp">TCP</option>
         <option value="udp">UDP</option>
       </select>
+      <label v-if="needsPort" for="trace-port" class="sr-only">Port</label>
       <input
         v-if="needsPort"
+        id="trace-port"
         v-model.number="form.port"
         class="ctl port"
         type="number"
@@ -119,12 +123,14 @@ async function copyReport(s: SiteState) {
         max="65535"
         placeholder="port"
       />
-      <select v-model="form.family" class="ctl">
+      <label for="trace-family" class="sr-only">IP version</label>
+      <select id="trace-family" v-model="form.family" class="ctl">
         <option value="">v4/v6</option>
         <option value="4">IPv4</option>
         <option value="6">IPv6</option>
       </select>
-      <select v-model="form.mode" class="ctl">
+      <label for="trace-mode" class="sr-only">Mode</label>
+      <select id="trace-mode" v-model="form.mode" class="ctl">
         <option value="mtr">trace</option>
         <option value="ping">ping</option>
       </select>
@@ -162,7 +168,13 @@ async function copyReport(s: SiteState) {
       </div>
 
       <template v-for="s in rows" :key="s.site">
-        <div class="row" :class="s.status" @click="s.expanded = !s.expanded">
+        <button
+          type="button"
+          class="row"
+          :class="s.status"
+          :aria-expanded="s.expanded"
+          @click="s.expanded = !s.expanded"
+        >
           <span class="c-site">
             <span class="caret" :class="{ open: s.expanded }">▶</span>{{ s.site }}
           </span>
@@ -193,7 +205,7 @@ async function copyReport(s: SiteState) {
               />
             </span>
           </span>
-        </div>
+        </button>
 
         <div v-if="s.expanded" class="hops">
           <div v-if="s.error" class="err">{{ s.error }}</div>
@@ -317,10 +329,18 @@ async function copyReport(s: SiteState) {
   border-bottom: 1px solid var(--line);
 }
 .row {
+  appearance: none;
+  width: 100%;
+  border: 0;
   border-bottom: 1px solid var(--line);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
 }
 .row:hover { background: var(--hover); }
+.row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .c-n { text-align: right; font-variant-numeric: tabular-nums; }
 .warnloss { color: var(--bad); font-weight: 600; }
 .muted { color: var(--fg-dim); }

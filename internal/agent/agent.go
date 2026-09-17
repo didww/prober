@@ -17,6 +17,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	pb "github.com/didww/prober/api/gen/prober/v1"
+	"github.com/didww/prober/internal/sip"
 	"github.com/didww/prober/internal/trace"
 )
 
@@ -306,19 +307,27 @@ func (a *Agent) hello() *pb.Hello {
 	}
 }
 
-// startJob resolves the target, then runs the engine in its own goroutine,
-// streaming every event back tagged with the job id.
+// startJob dispatches a job by its spec kind. Each kind resolves the target,
+// runs its engine in a goroutine, and streams events back tagged with the job
+// id.
 func (a *Agent) startJob(ctx context.Context, job *pb.StartJob, send func(*pb.AgentMessage) error) {
-	spec := job.GetTrace()
-	if spec == nil {
-		a.sendError(send, job.JobId, pb.JobError_CODE_UNSPECIFIED, "no trace spec")
-		return
-	}
 	if a.jobs.count() >= a.cfg.Limits.MaxConcurrentJobs {
 		a.sendError(send, job.JobId, pb.JobError_CODE_LIMIT, "agent at job limit")
 		return
 	}
+	switch job.Spec.(type) {
+	case *pb.StartJob_Trace:
+		a.startTrace(ctx, job, send)
+	case *pb.StartJob_SipOptions:
+		a.startSip(ctx, job, send)
+	default:
+		a.sendError(send, job.JobId, pb.JobError_CODE_UNSPECIFIED, "no job spec")
+	}
+}
 
+// startTrace runs a traceroute job.
+func (a *Agent) startTrace(ctx context.Context, job *pb.StartJob, send func(*pb.AgentMessage) error) {
+	spec := job.GetTrace()
 	resolved, err := a.resolve(ctx, spec)
 	if err != nil {
 		a.sendError(send, job.JobId, pb.JobError_CODE_RESOLVE, err.Error())
@@ -345,6 +354,41 @@ func (a *Agent) startJob(ctx context.Context, job *pb.StartJob, send func(*pb.Ag
 			je := eventToProto(job.JobId, a.seq.next(), ev)
 			if st := je.GetStarted(); st != nil && st.Source == "" && effSource.IsValid() {
 				st.Source = effSource.String()
+			}
+			_ = send(&pb.AgentMessage{Msg: &pb.AgentMessage_Event{Event: je}})
+		})
+		if err != nil {
+			a.sendError(send, job.JobId, pb.JobError_CODE_ENGINE, err.Error())
+		}
+	}()
+}
+
+// startSip runs a SIP OPTIONS job. SIP needs no raw sockets, so it works on
+// any host regardless of the trace engine's capabilities.
+func (a *Agent) startSip(ctx context.Context, job *pb.StartJob, send func(*pb.AgentMessage) error) {
+	spec := job.GetSipOptions()
+	resolved, err := a.resolveFamily(ctx, spec.Target, spec.Family)
+	if err != nil {
+		a.sendError(send, job.JobId, pb.JobError_CODE_RESOLVE, err.Error())
+		return
+	}
+
+	jobCtx, cancel := context.WithCancel(ctx)
+	a.jobs.add(job.JobId, cancel)
+
+	go func() {
+		defer a.jobs.remove(job.JobId)
+		es := sipSpecFromProto(spec, resolved)
+		if es.UserAgent == "" {
+			es.UserAgent = "prober/" + a.version
+		}
+		if !es.Source.IsValid() {
+			es.Source = dialSource(resolved, es.Port)
+		}
+		err := sip.Run(jobCtx, es, a.log, func(ev sip.Event) {
+			je := sipEventToProto(job.JobId, a.seq.next(), ev)
+			if st := je.GetStarted(); st != nil && st.Source == "" && es.Source.IsValid() {
+				st.Source = es.Source.String()
 			}
 			_ = send(&pb.AgentMessage{Msg: &pb.AgentMessage_Event{Event: je}})
 		})
@@ -382,6 +426,40 @@ func (a *Agent) resolve(ctx context.Context, spec *pb.TraceSpec) (netip.Addr, er
 			ip = ip.Unmap()
 			if ip.Is6() == want6 && (ip.Is6() && caps.IPv6 || ip.Is4() && caps.IPv4) {
 				return ip, nil
+			}
+		}
+	}
+	return ips[0].Unmap(), nil
+}
+
+// resolveFamily resolves target (name or literal) to an address of the
+// requested family. Unlike resolve, it does not consult the trace engine's
+// capabilities — SIP runs on any host. When the family is unspecified it
+// prefers IPv4, then IPv6.
+func (a *Agent) resolveFamily(ctx context.Context, target string, family pb.AddressFamily) (netip.Addr, error) {
+	if addr, err := netip.ParseAddr(target); err == nil {
+		return addr.Unmap(), nil
+	}
+	network := "ip"
+	switch family {
+	case pb.AddressFamily_ADDRESS_FAMILY_IPV4:
+		network = "ip4"
+	case pb.AddressFamily_ADDRESS_FAMILY_IPV6:
+		network = "ip6"
+	}
+	ips, err := net.DefaultResolver.LookupNetIP(ctx, network, target)
+	if err != nil {
+		return netip.Addr{}, err
+	}
+	if len(ips) == 0 {
+		return netip.Addr{}, errors.New("no addresses")
+	}
+	if family == pb.AddressFamily_ADDRESS_FAMILY_UNSPECIFIED {
+		for _, want4 := range []bool{true, false} {
+			for _, ip := range ips {
+				if ip.Unmap().Is4() == want4 {
+					return ip.Unmap(), nil
+				}
 			}
 		}
 	}

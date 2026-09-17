@@ -15,7 +15,7 @@ import { begin } from '../session'
         <circle cx="21" cy="12" r="1.6" fill="currentColor" stroke="none" />
       </svg>
       <h1>prober</h1>
-      <button type="button" class="primary" autofocus @click="begin">Log in</button>
+      <button type="button" class="primary" @click="begin">Log in</button>
       <p class="note">You will be sent to your identity provider.</p>
     </div>
   </div>

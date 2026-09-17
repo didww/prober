@@ -188,6 +188,61 @@ func (TraceMode) EnumDescriptor() ([]byte, []int) {
 	return file_prober_v1_agent_proto_rawDescGZIP(), []int{2}
 }
 
+type SipTransport int32
+
+const (
+	SipTransport_SIP_TRANSPORT_UNSPECIFIED SipTransport = 0
+	SipTransport_SIP_TRANSPORT_UDP         SipTransport = 1
+	SipTransport_SIP_TRANSPORT_TCP         SipTransport = 2
+	SipTransport_SIP_TRANSPORT_TLS         SipTransport = 3
+	SipTransport_SIP_TRANSPORT_WSS         SipTransport = 4
+)
+
+// Enum value maps for SipTransport.
+var (
+	SipTransport_name = map[int32]string{
+		0: "SIP_TRANSPORT_UNSPECIFIED",
+		1: "SIP_TRANSPORT_UDP",
+		2: "SIP_TRANSPORT_TCP",
+		3: "SIP_TRANSPORT_TLS",
+		4: "SIP_TRANSPORT_WSS",
+	}
+	SipTransport_value = map[string]int32{
+		"SIP_TRANSPORT_UNSPECIFIED": 0,
+		"SIP_TRANSPORT_UDP":         1,
+		"SIP_TRANSPORT_TCP":         2,
+		"SIP_TRANSPORT_TLS":         3,
+		"SIP_TRANSPORT_WSS":         4,
+	}
+)
+
+func (x SipTransport) Enum() *SipTransport {
+	p := new(SipTransport)
+	*p = x
+	return p
+}
+
+func (x SipTransport) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (SipTransport) Descriptor() protoreflect.EnumDescriptor {
+	return file_prober_v1_agent_proto_enumTypes[3].Descriptor()
+}
+
+func (SipTransport) Type() protoreflect.EnumType {
+	return &file_prober_v1_agent_proto_enumTypes[3]
+}
+
+func (x SipTransport) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use SipTransport.Descriptor instead.
+func (SipTransport) EnumDescriptor() ([]byte, []int) {
+	return file_prober_v1_agent_proto_rawDescGZIP(), []int{3}
+}
+
 type JobFinished_Reason int32
 
 const (
@@ -221,11 +276,11 @@ func (x JobFinished_Reason) String() string {
 }
 
 func (JobFinished_Reason) Descriptor() protoreflect.EnumDescriptor {
-	return file_prober_v1_agent_proto_enumTypes[3].Descriptor()
+	return file_prober_v1_agent_proto_enumTypes[4].Descriptor()
 }
 
 func (JobFinished_Reason) Type() protoreflect.EnumType {
-	return &file_prober_v1_agent_proto_enumTypes[3]
+	return &file_prober_v1_agent_proto_enumTypes[4]
 }
 
 func (x JobFinished_Reason) Number() protoreflect.EnumNumber {
@@ -234,7 +289,7 @@ func (x JobFinished_Reason) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use JobFinished_Reason.Descriptor instead.
 func (JobFinished_Reason) EnumDescriptor() ([]byte, []int) {
-	return file_prober_v1_agent_proto_rawDescGZIP(), []int{20, 0}
+	return file_prober_v1_agent_proto_rawDescGZIP(), []int{22, 0}
 }
 
 type JobError_Code int32
@@ -276,11 +331,11 @@ func (x JobError_Code) String() string {
 }
 
 func (JobError_Code) Descriptor() protoreflect.EnumDescriptor {
-	return file_prober_v1_agent_proto_enumTypes[4].Descriptor()
+	return file_prober_v1_agent_proto_enumTypes[5].Descriptor()
 }
 
 func (JobError_Code) Type() protoreflect.EnumType {
-	return &file_prober_v1_agent_proto_enumTypes[4]
+	return &file_prober_v1_agent_proto_enumTypes[5]
 }
 
 func (x JobError_Code) Number() protoreflect.EnumNumber {
@@ -289,7 +344,7 @@ func (x JobError_Code) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use JobError_Code.Descriptor instead.
 func (JobError_Code) EnumDescriptor() ([]byte, []int) {
-	return file_prober_v1_agent_proto_rawDescGZIP(), []int{21, 0}
+	return file_prober_v1_agent_proto_rawDescGZIP(), []int{23, 0}
 }
 
 type AgentMessage struct {
@@ -925,6 +980,7 @@ type StartJob struct {
 	// Types that are valid to be assigned to Spec:
 	//
 	//	*StartJob_Trace
+	//	*StartJob_SipOptions
 	Spec          isStartJob_Spec `protobuf_oneof:"spec"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -983,6 +1039,15 @@ func (x *StartJob) GetTrace() *TraceSpec {
 	return nil
 }
 
+func (x *StartJob) GetSipOptions() *SipOptionsSpec {
+	if x != nil {
+		if x, ok := x.Spec.(*StartJob_SipOptions); ok {
+			return x.SipOptions
+		}
+	}
+	return nil
+}
+
 type isStartJob_Spec interface {
 	isStartJob_Spec()
 }
@@ -991,7 +1056,13 @@ type StartJob_Trace struct {
 	Trace *TraceSpec `protobuf:"bytes,10,opt,name=trace,proto3,oneof"`
 }
 
+type StartJob_SipOptions struct {
+	SipOptions *SipOptionsSpec `protobuf:"bytes,11,opt,name=sip_options,json=sipOptions,proto3,oneof"`
+}
+
 func (*StartJob_Trace) isStartJob_Spec() {}
+
+func (*StartJob_SipOptions) isStartJob_Spec() {}
 
 type CancelJob struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1467,6 +1538,245 @@ func (x *TraceSpec) GetProbeTimeoutMs() uint32 {
 	return 0
 }
 
+// SipOptionsSpec is a repeated SIP OPTIONS reachability probe. Exactly one
+// request is sent per cycle (no retransmission), so N cycles is N requests and
+// a lost packet shows as a timeout rather than being masked.
+type SipOptionsSpec struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Target string                 `protobuf:"bytes,1,opt,name=target,proto3" json:"target,omitempty"`
+	// Destination port; 0 means the transport default (5060 udp/tcp, 5061 tls,
+	// 443 wss).
+	Port      uint32        `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
+	Transport SipTransport  `protobuf:"varint,3,opt,name=transport,proto3,enum=prober.v1.SipTransport" json:"transport,omitempty"`
+	Family    AddressFamily `protobuf:"varint,4,opt,name=family,proto3,enum=prober.v1.AddressFamily" json:"family,omitempty"`
+	// Number of OPTIONS to send; 0 means until the run is stopped.
+	Cycles     uint32 `protobuf:"varint,5,opt,name=cycles,proto3" json:"cycles,omitempty"`
+	IntervalMs uint32 `protobuf:"varint,6,opt,name=interval_ms,json=intervalMs,proto3" json:"interval_ms,omitempty"`
+	// How long to wait for a response before the cycle counts as a timeout.
+	TimeoutMs uint32 `protobuf:"varint,7,opt,name=timeout_ms,json=timeoutMs,proto3" json:"timeout_ms,omitempty"`
+	// Source address to send from; empty picks the routing default.
+	Source string `protobuf:"bytes,8,opt,name=source,proto3" json:"source,omitempty"`
+	// User-Agent header value; empty uses the agent default.
+	UserAgent     string `protobuf:"bytes,9,opt,name=user_agent,json=userAgent,proto3" json:"user_agent,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SipOptionsSpec) Reset() {
+	*x = SipOptionsSpec{}
+	mi := &file_prober_v1_agent_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SipOptionsSpec) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SipOptionsSpec) ProtoMessage() {}
+
+func (x *SipOptionsSpec) ProtoReflect() protoreflect.Message {
+	mi := &file_prober_v1_agent_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SipOptionsSpec.ProtoReflect.Descriptor instead.
+func (*SipOptionsSpec) Descriptor() ([]byte, []int) {
+	return file_prober_v1_agent_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *SipOptionsSpec) GetTarget() string {
+	if x != nil {
+		return x.Target
+	}
+	return ""
+}
+
+func (x *SipOptionsSpec) GetPort() uint32 {
+	if x != nil {
+		return x.Port
+	}
+	return 0
+}
+
+func (x *SipOptionsSpec) GetTransport() SipTransport {
+	if x != nil {
+		return x.Transport
+	}
+	return SipTransport_SIP_TRANSPORT_UNSPECIFIED
+}
+
+func (x *SipOptionsSpec) GetFamily() AddressFamily {
+	if x != nil {
+		return x.Family
+	}
+	return AddressFamily_ADDRESS_FAMILY_UNSPECIFIED
+}
+
+func (x *SipOptionsSpec) GetCycles() uint32 {
+	if x != nil {
+		return x.Cycles
+	}
+	return 0
+}
+
+func (x *SipOptionsSpec) GetIntervalMs() uint32 {
+	if x != nil {
+		return x.IntervalMs
+	}
+	return 0
+}
+
+func (x *SipOptionsSpec) GetTimeoutMs() uint32 {
+	if x != nil {
+		return x.TimeoutMs
+	}
+	return 0
+}
+
+func (x *SipOptionsSpec) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
+}
+
+func (x *SipOptionsSpec) GetUserAgent() string {
+	if x != nil {
+		return x.UserAgent
+	}
+	return ""
+}
+
+// SipResult is one cycle's outcome.
+type SipResult struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Cycle uint32                 `protobuf:"varint,1,opt,name=cycle,proto3" json:"cycle,omitempty"`
+	// The SIP status code, or 0 when no response arrived (timeout).
+	StatusCode uint32  `protobuf:"varint,2,opt,name=status_code,json=statusCode,proto3" json:"status_code,omitempty"`
+	Reason     string  `protobuf:"bytes,3,opt,name=reason,proto3" json:"reason,omitempty"`
+	RttUs      *uint32 `protobuf:"varint,4,opt,name=rtt_us,json=rttUs,proto3,oneof" json:"rtt_us,omitempty"`
+	Responded  bool    `protobuf:"varint,5,opt,name=responded,proto3" json:"responded,omitempty"`
+	// The raw request and response text, for the expanded row.
+	Request  string `protobuf:"bytes,6,opt,name=request,proto3" json:"request,omitempty"`
+	Response string `protobuf:"bytes,7,opt,name=response,proto3" json:"response,omitempty"`
+	// TLS validity, for the tls and wss transports. tls is true when a TLS
+	// transport was used; tls_valid is whether the server certificate chained to
+	// a trusted root and matched the name; tls_error says why not, for a warning.
+	Tls           bool   `protobuf:"varint,8,opt,name=tls,proto3" json:"tls,omitempty"`
+	TlsValid      bool   `protobuf:"varint,9,opt,name=tls_valid,json=tlsValid,proto3" json:"tls_valid,omitempty"`
+	TlsError      string `protobuf:"bytes,10,opt,name=tls_error,json=tlsError,proto3" json:"tls_error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SipResult) Reset() {
+	*x = SipResult{}
+	mi := &file_prober_v1_agent_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SipResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SipResult) ProtoMessage() {}
+
+func (x *SipResult) ProtoReflect() protoreflect.Message {
+	mi := &file_prober_v1_agent_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SipResult.ProtoReflect.Descriptor instead.
+func (*SipResult) Descriptor() ([]byte, []int) {
+	return file_prober_v1_agent_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *SipResult) GetCycle() uint32 {
+	if x != nil {
+		return x.Cycle
+	}
+	return 0
+}
+
+func (x *SipResult) GetStatusCode() uint32 {
+	if x != nil {
+		return x.StatusCode
+	}
+	return 0
+}
+
+func (x *SipResult) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *SipResult) GetRttUs() uint32 {
+	if x != nil && x.RttUs != nil {
+		return *x.RttUs
+	}
+	return 0
+}
+
+func (x *SipResult) GetResponded() bool {
+	if x != nil {
+		return x.Responded
+	}
+	return false
+}
+
+func (x *SipResult) GetRequest() string {
+	if x != nil {
+		return x.Request
+	}
+	return ""
+}
+
+func (x *SipResult) GetResponse() string {
+	if x != nil {
+		return x.Response
+	}
+	return ""
+}
+
+func (x *SipResult) GetTls() bool {
+	if x != nil {
+		return x.Tls
+	}
+	return false
+}
+
+func (x *SipResult) GetTlsValid() bool {
+	if x != nil {
+		return x.TlsValid
+	}
+	return false
+}
+
+func (x *SipResult) GetTlsError() string {
+	if x != nil {
+		return x.TlsError
+	}
+	return ""
+}
+
 // JobEvent is anything an agent reports about a job. Every event carries the
 // agent's clock and a per-agent monotonic sequence, so the backend can store
 // or deduplicate events without state about the job.
@@ -1481,6 +1791,7 @@ type JobEvent struct {
 	//	*JobEvent_Cycle
 	//	*JobEvent_Finished
 	//	*JobEvent_Error
+	//	*JobEvent_SipResult
 	Event         isJobEvent_Event `protobuf_oneof:"event"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1488,7 +1799,7 @@ type JobEvent struct {
 
 func (x *JobEvent) Reset() {
 	*x = JobEvent{}
-	mi := &file_prober_v1_agent_proto_msgTypes[15]
+	mi := &file_prober_v1_agent_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1500,7 +1811,7 @@ func (x *JobEvent) String() string {
 func (*JobEvent) ProtoMessage() {}
 
 func (x *JobEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_prober_v1_agent_proto_msgTypes[15]
+	mi := &file_prober_v1_agent_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1513,7 +1824,7 @@ func (x *JobEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobEvent.ProtoReflect.Descriptor instead.
 func (*JobEvent) Descriptor() ([]byte, []int) {
-	return file_prober_v1_agent_proto_rawDescGZIP(), []int{15}
+	return file_prober_v1_agent_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *JobEvent) GetJobId() string {
@@ -1580,6 +1891,15 @@ func (x *JobEvent) GetError() *JobError {
 	return nil
 }
 
+func (x *JobEvent) GetSipResult() *SipResult {
+	if x != nil {
+		if x, ok := x.Event.(*JobEvent_SipResult); ok {
+			return x.SipResult
+		}
+	}
+	return nil
+}
+
 type isJobEvent_Event interface {
 	isJobEvent_Event()
 }
@@ -1600,6 +1920,10 @@ type JobEvent_Error struct {
 	Error *JobError `protobuf:"bytes,13,opt,name=error,proto3,oneof"`
 }
 
+type JobEvent_SipResult struct {
+	SipResult *SipResult `protobuf:"bytes,14,opt,name=sip_result,json=sipResult,proto3,oneof"`
+}
+
 func (*JobEvent_Started) isJobEvent_Event() {}
 
 func (*JobEvent_Cycle) isJobEvent_Event() {}
@@ -1608,23 +1932,27 @@ func (*JobEvent_Finished) isJobEvent_Event() {}
 
 func (*JobEvent_Error) isJobEvent_Event() {}
 
+func (*JobEvent_SipResult) isJobEvent_Event() {}
+
 // JobStarted is sent once the target resolved and probing began.
 type JobStarted struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
 	Target string                 `protobuf:"bytes,1,opt,name=target,proto3" json:"target,omitempty"`
 	// The address actually probed. It can differ per site for anycast and
 	// GeoDNS targets, which is why the UI shows it per row.
-	Resolved      string        `protobuf:"bytes,2,opt,name=resolved,proto3" json:"resolved,omitempty"`
-	Source        string        `protobuf:"bytes,3,opt,name=source,proto3" json:"source,omitempty"`
-	Protocol      Protocol      `protobuf:"varint,4,opt,name=protocol,proto3,enum=prober.v1.Protocol" json:"protocol,omitempty"`
-	Family        AddressFamily `protobuf:"varint,5,opt,name=family,proto3,enum=prober.v1.AddressFamily" json:"family,omitempty"`
+	Resolved string        `protobuf:"bytes,2,opt,name=resolved,proto3" json:"resolved,omitempty"`
+	Source   string        `protobuf:"bytes,3,opt,name=source,proto3" json:"source,omitempty"`
+	Protocol Protocol      `protobuf:"varint,4,opt,name=protocol,proto3,enum=prober.v1.Protocol" json:"protocol,omitempty"`
+	Family   AddressFamily `protobuf:"varint,5,opt,name=family,proto3,enum=prober.v1.AddressFamily" json:"family,omitempty"`
+	// For SIP: the transport used (udp/tcp/tls/wss). Empty for trace.
+	Transport     string `protobuf:"bytes,6,opt,name=transport,proto3" json:"transport,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *JobStarted) Reset() {
 	*x = JobStarted{}
-	mi := &file_prober_v1_agent_proto_msgTypes[16]
+	mi := &file_prober_v1_agent_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1636,7 +1964,7 @@ func (x *JobStarted) String() string {
 func (*JobStarted) ProtoMessage() {}
 
 func (x *JobStarted) ProtoReflect() protoreflect.Message {
-	mi := &file_prober_v1_agent_proto_msgTypes[16]
+	mi := &file_prober_v1_agent_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1649,7 +1977,7 @@ func (x *JobStarted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobStarted.ProtoReflect.Descriptor instead.
 func (*JobStarted) Descriptor() ([]byte, []int) {
-	return file_prober_v1_agent_proto_rawDescGZIP(), []int{16}
+	return file_prober_v1_agent_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *JobStarted) GetTarget() string {
@@ -1687,6 +2015,13 @@ func (x *JobStarted) GetFamily() AddressFamily {
 	return AddressFamily_ADDRESS_FAMILY_UNSPECIFIED
 }
 
+func (x *JobStarted) GetTransport() string {
+	if x != nil {
+		return x.Transport
+	}
+	return ""
+}
+
 // Cycle is emitted once per cycle with every hop's sample and its running
 // aggregates. One event per site per cycle keeps the stream small.
 type Cycle struct {
@@ -1701,7 +2036,7 @@ type Cycle struct {
 
 func (x *Cycle) Reset() {
 	*x = Cycle{}
-	mi := &file_prober_v1_agent_proto_msgTypes[17]
+	mi := &file_prober_v1_agent_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1713,7 +2048,7 @@ func (x *Cycle) String() string {
 func (*Cycle) ProtoMessage() {}
 
 func (x *Cycle) ProtoReflect() protoreflect.Message {
-	mi := &file_prober_v1_agent_proto_msgTypes[17]
+	mi := &file_prober_v1_agent_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1726,7 +2061,7 @@ func (x *Cycle) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Cycle.ProtoReflect.Descriptor instead.
 func (*Cycle) Descriptor() ([]byte, []int) {
-	return file_prober_v1_agent_proto_rawDescGZIP(), []int{17}
+	return file_prober_v1_agent_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *Cycle) GetNumber() uint32 {
@@ -1775,7 +2110,7 @@ type Hop struct {
 
 func (x *Hop) Reset() {
 	*x = Hop{}
-	mi := &file_prober_v1_agent_proto_msgTypes[18]
+	mi := &file_prober_v1_agent_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1787,7 +2122,7 @@ func (x *Hop) String() string {
 func (*Hop) ProtoMessage() {}
 
 func (x *Hop) ProtoReflect() protoreflect.Message {
-	mi := &file_prober_v1_agent_proto_msgTypes[18]
+	mi := &file_prober_v1_agent_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1800,7 +2135,7 @@ func (x *Hop) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Hop.ProtoReflect.Descriptor instead.
 func (*Hop) Descriptor() ([]byte, []int) {
-	return file_prober_v1_agent_proto_rawDescGZIP(), []int{18}
+	return file_prober_v1_agent_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *Hop) GetTtl() uint32 {
@@ -1900,7 +2235,7 @@ type HopAddress struct {
 
 func (x *HopAddress) Reset() {
 	*x = HopAddress{}
-	mi := &file_prober_v1_agent_proto_msgTypes[19]
+	mi := &file_prober_v1_agent_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1912,7 +2247,7 @@ func (x *HopAddress) String() string {
 func (*HopAddress) ProtoMessage() {}
 
 func (x *HopAddress) ProtoReflect() protoreflect.Message {
-	mi := &file_prober_v1_agent_proto_msgTypes[19]
+	mi := &file_prober_v1_agent_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1925,7 +2260,7 @@ func (x *HopAddress) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HopAddress.ProtoReflect.Descriptor instead.
 func (*HopAddress) Descriptor() ([]byte, []int) {
-	return file_prober_v1_agent_proto_rawDescGZIP(), []int{19}
+	return file_prober_v1_agent_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *HopAddress) GetIp() string {
@@ -1959,7 +2294,7 @@ type JobFinished struct {
 
 func (x *JobFinished) Reset() {
 	*x = JobFinished{}
-	mi := &file_prober_v1_agent_proto_msgTypes[20]
+	mi := &file_prober_v1_agent_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1971,7 +2306,7 @@ func (x *JobFinished) String() string {
 func (*JobFinished) ProtoMessage() {}
 
 func (x *JobFinished) ProtoReflect() protoreflect.Message {
-	mi := &file_prober_v1_agent_proto_msgTypes[20]
+	mi := &file_prober_v1_agent_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1984,7 +2319,7 @@ func (x *JobFinished) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobFinished.ProtoReflect.Descriptor instead.
 func (*JobFinished) Descriptor() ([]byte, []int) {
-	return file_prober_v1_agent_proto_rawDescGZIP(), []int{20}
+	return file_prober_v1_agent_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *JobFinished) GetCycles() uint32 {
@@ -2013,7 +2348,7 @@ type JobError struct {
 
 func (x *JobError) Reset() {
 	*x = JobError{}
-	mi := &file_prober_v1_agent_proto_msgTypes[21]
+	mi := &file_prober_v1_agent_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2025,7 +2360,7 @@ func (x *JobError) String() string {
 func (*JobError) ProtoMessage() {}
 
 func (x *JobError) ProtoReflect() protoreflect.Message {
-	mi := &file_prober_v1_agent_proto_msgTypes[21]
+	mi := &file_prober_v1_agent_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2038,7 +2373,7 @@ func (x *JobError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobError.ProtoReflect.Descriptor instead.
 func (*JobError) Descriptor() ([]byte, []int) {
-	return file_prober_v1_agent_proto_rawDescGZIP(), []int{21}
+	return file_prober_v1_agent_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *JobError) GetCode() JobError_Code {
@@ -2105,11 +2440,13 @@ const file_prober_v1_agent_proto_rawDesc = "" +
 	"\aWelcome\x12\x12\n" +
 	"\x04site\x18\x01 \x01(\tR\x04site\x12.\n" +
 	"\x04time\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x04time\x122\n" +
-	"\x15heartbeat_interval_ms\x18\x03 \x01(\rR\x13heartbeatIntervalMs\"W\n" +
+	"\x15heartbeat_interval_ms\x18\x03 \x01(\rR\x13heartbeatIntervalMs\"\x95\x01\n" +
 	"\bStartJob\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12,\n" +
 	"\x05trace\x18\n" +
-	" \x01(\v2\x14.prober.v1.TraceSpecH\x00R\x05traceB\x06\n" +
+	" \x01(\v2\x14.prober.v1.TraceSpecH\x00R\x05trace\x12<\n" +
+	"\vsip_options\x18\v \x01(\v2\x19.prober.v1.SipOptionsSpecH\x00R\n" +
+	"sipOptionsB\x06\n" +
 	"\x04spec\"\"\n" +
 	"\tCancelJob\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\"V\n" +
@@ -2147,7 +2484,34 @@ const file_prober_v1_agent_proto_rawDesc = "" +
 	"\x04dscp\x18\v \x01(\rR\x04dscp\x12\x16\n" +
 	"\x06source\x18\f \x01(\tR\x06source\x12(\n" +
 	"\x04mode\x18\r \x01(\x0e2\x14.prober.v1.TraceModeR\x04mode\x12(\n" +
-	"\x10probe_timeout_ms\x18\x0e \x01(\rR\x0eprobeTimeoutMs\"\xac\x02\n" +
+	"\x10probe_timeout_ms\x18\x0e \x01(\rR\x0eprobeTimeoutMs\"\xb4\x02\n" +
+	"\x0eSipOptionsSpec\x12\x16\n" +
+	"\x06target\x18\x01 \x01(\tR\x06target\x12\x12\n" +
+	"\x04port\x18\x02 \x01(\rR\x04port\x125\n" +
+	"\ttransport\x18\x03 \x01(\x0e2\x17.prober.v1.SipTransportR\ttransport\x120\n" +
+	"\x06family\x18\x04 \x01(\x0e2\x18.prober.v1.AddressFamilyR\x06family\x12\x16\n" +
+	"\x06cycles\x18\x05 \x01(\rR\x06cycles\x12\x1f\n" +
+	"\vinterval_ms\x18\x06 \x01(\rR\n" +
+	"intervalMs\x12\x1d\n" +
+	"\n" +
+	"timeout_ms\x18\a \x01(\rR\ttimeoutMs\x12\x16\n" +
+	"\x06source\x18\b \x01(\tR\x06source\x12\x1d\n" +
+	"\n" +
+	"user_agent\x18\t \x01(\tR\tuserAgent\"\xa1\x02\n" +
+	"\tSipResult\x12\x14\n" +
+	"\x05cycle\x18\x01 \x01(\rR\x05cycle\x12\x1f\n" +
+	"\vstatus_code\x18\x02 \x01(\rR\n" +
+	"statusCode\x12\x16\n" +
+	"\x06reason\x18\x03 \x01(\tR\x06reason\x12\x1a\n" +
+	"\x06rtt_us\x18\x04 \x01(\rH\x00R\x05rttUs\x88\x01\x01\x12\x1c\n" +
+	"\tresponded\x18\x05 \x01(\bR\tresponded\x12\x18\n" +
+	"\arequest\x18\x06 \x01(\tR\arequest\x12\x1a\n" +
+	"\bresponse\x18\a \x01(\tR\bresponse\x12\x10\n" +
+	"\x03tls\x18\b \x01(\bR\x03tls\x12\x1b\n" +
+	"\ttls_valid\x18\t \x01(\bR\btlsValid\x12\x1b\n" +
+	"\ttls_error\x18\n" +
+	" \x01(\tR\btlsErrorB\t\n" +
+	"\a_rtt_us\"\xe3\x02\n" +
 	"\bJobEvent\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x10\n" +
 	"\x03seq\x18\x02 \x01(\x04R\x03seq\x12.\n" +
@@ -2156,15 +2520,18 @@ const file_prober_v1_agent_proto_rawDesc = "" +
 	" \x01(\v2\x15.prober.v1.JobStartedH\x00R\astarted\x12(\n" +
 	"\x05cycle\x18\v \x01(\v2\x10.prober.v1.CycleH\x00R\x05cycle\x124\n" +
 	"\bfinished\x18\f \x01(\v2\x16.prober.v1.JobFinishedH\x00R\bfinished\x12+\n" +
-	"\x05error\x18\r \x01(\v2\x13.prober.v1.JobErrorH\x00R\x05errorB\a\n" +
-	"\x05event\"\xbb\x01\n" +
+	"\x05error\x18\r \x01(\v2\x13.prober.v1.JobErrorH\x00R\x05error\x125\n" +
+	"\n" +
+	"sip_result\x18\x0e \x01(\v2\x14.prober.v1.SipResultH\x00R\tsipResultB\a\n" +
+	"\x05event\"\xd9\x01\n" +
 	"\n" +
 	"JobStarted\x12\x16\n" +
 	"\x06target\x18\x01 \x01(\tR\x06target\x12\x1a\n" +
 	"\bresolved\x18\x02 \x01(\tR\bresolved\x12\x16\n" +
 	"\x06source\x18\x03 \x01(\tR\x06source\x12/\n" +
 	"\bprotocol\x18\x04 \x01(\x0e2\x13.prober.v1.ProtocolR\bprotocol\x120\n" +
-	"\x06family\x18\x05 \x01(\x0e2\x18.prober.v1.AddressFamilyR\x06family\"b\n" +
+	"\x06family\x18\x05 \x01(\x0e2\x18.prober.v1.AddressFamilyR\x06family\x12\x1c\n" +
+	"\ttransport\x18\x06 \x01(\tR\ttransport\"b\n" +
 	"\x05Cycle\x12\x16\n" +
 	"\x06number\x18\x01 \x01(\rR\x06number\x12\x1d\n" +
 	"\n" +
@@ -2220,7 +2587,13 @@ const file_prober_v1_agent_proto_rawDesc = "" +
 	"\tTraceMode\x12\x1a\n" +
 	"\x16TRACE_MODE_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eTRACE_MODE_MTR\x10\x01\x12\x13\n" +
-	"\x0fTRACE_MODE_PING\x10\x022Q\n" +
+	"\x0fTRACE_MODE_PING\x10\x02*\x89\x01\n" +
+	"\fSipTransport\x12\x1d\n" +
+	"\x19SIP_TRANSPORT_UNSPECIFIED\x10\x00\x12\x15\n" +
+	"\x11SIP_TRANSPORT_UDP\x10\x01\x12\x15\n" +
+	"\x11SIP_TRANSPORT_TCP\x10\x02\x12\x15\n" +
+	"\x11SIP_TRANSPORT_TLS\x10\x03\x12\x15\n" +
+	"\x11SIP_TRANSPORT_WSS\x10\x042Q\n" +
 	"\fAgentGateway\x12A\n" +
 	"\aSession\x12\x17.prober.v1.AgentMessage\x1a\x19.prober.v1.BackendMessage(\x010\x01B4Z2github.com/didww/prober/api/gen/prober/v1;proberv1b\x06proto3"
 
@@ -2236,78 +2609,85 @@ func file_prober_v1_agent_proto_rawDescGZIP() []byte {
 	return file_prober_v1_agent_proto_rawDescData
 }
 
-var file_prober_v1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
-var file_prober_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_prober_v1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
+var file_prober_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
 var file_prober_v1_agent_proto_goTypes = []any{
 	(Protocol)(0),                 // 0: prober.v1.Protocol
 	(AddressFamily)(0),            // 1: prober.v1.AddressFamily
 	(TraceMode)(0),                // 2: prober.v1.TraceMode
-	(JobFinished_Reason)(0),       // 3: prober.v1.JobFinished.Reason
-	(JobError_Code)(0),            // 4: prober.v1.JobError.Code
-	(*AgentMessage)(nil),          // 5: prober.v1.AgentMessage
-	(*BackendMessage)(nil),        // 6: prober.v1.BackendMessage
-	(*Hello)(nil),                 // 7: prober.v1.Hello
-	(*Capabilities)(nil),          // 8: prober.v1.Capabilities
-	(*Limits)(nil),                // 9: prober.v1.Limits
-	(*Heartbeat)(nil),             // 10: prober.v1.Heartbeat
-	(*Welcome)(nil),               // 11: prober.v1.Welcome
-	(*StartJob)(nil),              // 12: prober.v1.StartJob
-	(*CancelJob)(nil),             // 13: prober.v1.CancelJob
-	(*Assignment)(nil),            // 14: prober.v1.Assignment
-	(*Monitor)(nil),               // 15: prober.v1.Monitor
-	(*Ack)(nil),                   // 16: prober.v1.Ack
-	(*Ping)(nil),                  // 17: prober.v1.Ping
-	(*Pong)(nil),                  // 18: prober.v1.Pong
-	(*TraceSpec)(nil),             // 19: prober.v1.TraceSpec
-	(*JobEvent)(nil),              // 20: prober.v1.JobEvent
-	(*JobStarted)(nil),            // 21: prober.v1.JobStarted
-	(*Cycle)(nil),                 // 22: prober.v1.Cycle
-	(*Hop)(nil),                   // 23: prober.v1.Hop
-	(*HopAddress)(nil),            // 24: prober.v1.HopAddress
-	(*JobFinished)(nil),           // 25: prober.v1.JobFinished
-	(*JobError)(nil),              // 26: prober.v1.JobError
-	(*timestamppb.Timestamp)(nil), // 27: google.protobuf.Timestamp
+	(SipTransport)(0),             // 3: prober.v1.SipTransport
+	(JobFinished_Reason)(0),       // 4: prober.v1.JobFinished.Reason
+	(JobError_Code)(0),            // 5: prober.v1.JobError.Code
+	(*AgentMessage)(nil),          // 6: prober.v1.AgentMessage
+	(*BackendMessage)(nil),        // 7: prober.v1.BackendMessage
+	(*Hello)(nil),                 // 8: prober.v1.Hello
+	(*Capabilities)(nil),          // 9: prober.v1.Capabilities
+	(*Limits)(nil),                // 10: prober.v1.Limits
+	(*Heartbeat)(nil),             // 11: prober.v1.Heartbeat
+	(*Welcome)(nil),               // 12: prober.v1.Welcome
+	(*StartJob)(nil),              // 13: prober.v1.StartJob
+	(*CancelJob)(nil),             // 14: prober.v1.CancelJob
+	(*Assignment)(nil),            // 15: prober.v1.Assignment
+	(*Monitor)(nil),               // 16: prober.v1.Monitor
+	(*Ack)(nil),                   // 17: prober.v1.Ack
+	(*Ping)(nil),                  // 18: prober.v1.Ping
+	(*Pong)(nil),                  // 19: prober.v1.Pong
+	(*TraceSpec)(nil),             // 20: prober.v1.TraceSpec
+	(*SipOptionsSpec)(nil),        // 21: prober.v1.SipOptionsSpec
+	(*SipResult)(nil),             // 22: prober.v1.SipResult
+	(*JobEvent)(nil),              // 23: prober.v1.JobEvent
+	(*JobStarted)(nil),            // 24: prober.v1.JobStarted
+	(*Cycle)(nil),                 // 25: prober.v1.Cycle
+	(*Hop)(nil),                   // 26: prober.v1.Hop
+	(*HopAddress)(nil),            // 27: prober.v1.HopAddress
+	(*JobFinished)(nil),           // 28: prober.v1.JobFinished
+	(*JobError)(nil),              // 29: prober.v1.JobError
+	(*timestamppb.Timestamp)(nil), // 30: google.protobuf.Timestamp
 }
 var file_prober_v1_agent_proto_depIdxs = []int32{
-	7,  // 0: prober.v1.AgentMessage.hello:type_name -> prober.v1.Hello
-	10, // 1: prober.v1.AgentMessage.heartbeat:type_name -> prober.v1.Heartbeat
-	20, // 2: prober.v1.AgentMessage.event:type_name -> prober.v1.JobEvent
-	18, // 3: prober.v1.AgentMessage.pong:type_name -> prober.v1.Pong
-	11, // 4: prober.v1.BackendMessage.welcome:type_name -> prober.v1.Welcome
-	12, // 5: prober.v1.BackendMessage.start:type_name -> prober.v1.StartJob
-	13, // 6: prober.v1.BackendMessage.cancel:type_name -> prober.v1.CancelJob
-	14, // 7: prober.v1.BackendMessage.assignment:type_name -> prober.v1.Assignment
-	16, // 8: prober.v1.BackendMessage.ack:type_name -> prober.v1.Ack
-	17, // 9: prober.v1.BackendMessage.ping:type_name -> prober.v1.Ping
-	8,  // 10: prober.v1.Hello.capabilities:type_name -> prober.v1.Capabilities
-	9,  // 11: prober.v1.Hello.limits:type_name -> prober.v1.Limits
-	27, // 12: prober.v1.Hello.started_at:type_name -> google.protobuf.Timestamp
-	27, // 13: prober.v1.Heartbeat.time:type_name -> google.protobuf.Timestamp
-	27, // 14: prober.v1.Welcome.time:type_name -> google.protobuf.Timestamp
-	19, // 15: prober.v1.StartJob.trace:type_name -> prober.v1.TraceSpec
-	15, // 16: prober.v1.Assignment.monitors:type_name -> prober.v1.Monitor
-	19, // 17: prober.v1.Monitor.trace:type_name -> prober.v1.TraceSpec
-	0,  // 18: prober.v1.TraceSpec.protocol:type_name -> prober.v1.Protocol
-	1,  // 19: prober.v1.TraceSpec.family:type_name -> prober.v1.AddressFamily
-	2,  // 20: prober.v1.TraceSpec.mode:type_name -> prober.v1.TraceMode
-	27, // 21: prober.v1.JobEvent.time:type_name -> google.protobuf.Timestamp
-	21, // 22: prober.v1.JobEvent.started:type_name -> prober.v1.JobStarted
-	22, // 23: prober.v1.JobEvent.cycle:type_name -> prober.v1.Cycle
-	25, // 24: prober.v1.JobEvent.finished:type_name -> prober.v1.JobFinished
-	26, // 25: prober.v1.JobEvent.error:type_name -> prober.v1.JobError
-	0,  // 26: prober.v1.JobStarted.protocol:type_name -> prober.v1.Protocol
-	1,  // 27: prober.v1.JobStarted.family:type_name -> prober.v1.AddressFamily
-	23, // 28: prober.v1.Cycle.hops:type_name -> prober.v1.Hop
-	24, // 29: prober.v1.Hop.addresses:type_name -> prober.v1.HopAddress
-	3,  // 30: prober.v1.JobFinished.reason:type_name -> prober.v1.JobFinished.Reason
-	4,  // 31: prober.v1.JobError.code:type_name -> prober.v1.JobError.Code
-	5,  // 32: prober.v1.AgentGateway.Session:input_type -> prober.v1.AgentMessage
-	6,  // 33: prober.v1.AgentGateway.Session:output_type -> prober.v1.BackendMessage
-	33, // [33:34] is the sub-list for method output_type
-	32, // [32:33] is the sub-list for method input_type
-	32, // [32:32] is the sub-list for extension type_name
-	32, // [32:32] is the sub-list for extension extendee
-	0,  // [0:32] is the sub-list for field type_name
+	8,  // 0: prober.v1.AgentMessage.hello:type_name -> prober.v1.Hello
+	11, // 1: prober.v1.AgentMessage.heartbeat:type_name -> prober.v1.Heartbeat
+	23, // 2: prober.v1.AgentMessage.event:type_name -> prober.v1.JobEvent
+	19, // 3: prober.v1.AgentMessage.pong:type_name -> prober.v1.Pong
+	12, // 4: prober.v1.BackendMessage.welcome:type_name -> prober.v1.Welcome
+	13, // 5: prober.v1.BackendMessage.start:type_name -> prober.v1.StartJob
+	14, // 6: prober.v1.BackendMessage.cancel:type_name -> prober.v1.CancelJob
+	15, // 7: prober.v1.BackendMessage.assignment:type_name -> prober.v1.Assignment
+	17, // 8: prober.v1.BackendMessage.ack:type_name -> prober.v1.Ack
+	18, // 9: prober.v1.BackendMessage.ping:type_name -> prober.v1.Ping
+	9,  // 10: prober.v1.Hello.capabilities:type_name -> prober.v1.Capabilities
+	10, // 11: prober.v1.Hello.limits:type_name -> prober.v1.Limits
+	30, // 12: prober.v1.Hello.started_at:type_name -> google.protobuf.Timestamp
+	30, // 13: prober.v1.Heartbeat.time:type_name -> google.protobuf.Timestamp
+	30, // 14: prober.v1.Welcome.time:type_name -> google.protobuf.Timestamp
+	20, // 15: prober.v1.StartJob.trace:type_name -> prober.v1.TraceSpec
+	21, // 16: prober.v1.StartJob.sip_options:type_name -> prober.v1.SipOptionsSpec
+	16, // 17: prober.v1.Assignment.monitors:type_name -> prober.v1.Monitor
+	20, // 18: prober.v1.Monitor.trace:type_name -> prober.v1.TraceSpec
+	0,  // 19: prober.v1.TraceSpec.protocol:type_name -> prober.v1.Protocol
+	1,  // 20: prober.v1.TraceSpec.family:type_name -> prober.v1.AddressFamily
+	2,  // 21: prober.v1.TraceSpec.mode:type_name -> prober.v1.TraceMode
+	3,  // 22: prober.v1.SipOptionsSpec.transport:type_name -> prober.v1.SipTransport
+	1,  // 23: prober.v1.SipOptionsSpec.family:type_name -> prober.v1.AddressFamily
+	30, // 24: prober.v1.JobEvent.time:type_name -> google.protobuf.Timestamp
+	24, // 25: prober.v1.JobEvent.started:type_name -> prober.v1.JobStarted
+	25, // 26: prober.v1.JobEvent.cycle:type_name -> prober.v1.Cycle
+	28, // 27: prober.v1.JobEvent.finished:type_name -> prober.v1.JobFinished
+	29, // 28: prober.v1.JobEvent.error:type_name -> prober.v1.JobError
+	22, // 29: prober.v1.JobEvent.sip_result:type_name -> prober.v1.SipResult
+	0,  // 30: prober.v1.JobStarted.protocol:type_name -> prober.v1.Protocol
+	1,  // 31: prober.v1.JobStarted.family:type_name -> prober.v1.AddressFamily
+	26, // 32: prober.v1.Cycle.hops:type_name -> prober.v1.Hop
+	27, // 33: prober.v1.Hop.addresses:type_name -> prober.v1.HopAddress
+	4,  // 34: prober.v1.JobFinished.reason:type_name -> prober.v1.JobFinished.Reason
+	5,  // 35: prober.v1.JobError.code:type_name -> prober.v1.JobError.Code
+	6,  // 36: prober.v1.AgentGateway.Session:input_type -> prober.v1.AgentMessage
+	7,  // 37: prober.v1.AgentGateway.Session:output_type -> prober.v1.BackendMessage
+	37, // [37:38] is the sub-list for method output_type
+	36, // [36:37] is the sub-list for method input_type
+	36, // [36:36] is the sub-list for extension type_name
+	36, // [36:36] is the sub-list for extension extendee
+	0,  // [0:36] is the sub-list for field type_name
 }
 
 func init() { file_prober_v1_agent_proto_init() }
@@ -2331,24 +2711,27 @@ func file_prober_v1_agent_proto_init() {
 	}
 	file_prober_v1_agent_proto_msgTypes[7].OneofWrappers = []any{
 		(*StartJob_Trace)(nil),
+		(*StartJob_SipOptions)(nil),
 	}
 	file_prober_v1_agent_proto_msgTypes[10].OneofWrappers = []any{
 		(*Monitor_Trace)(nil),
 	}
-	file_prober_v1_agent_proto_msgTypes[15].OneofWrappers = []any{
+	file_prober_v1_agent_proto_msgTypes[16].OneofWrappers = []any{}
+	file_prober_v1_agent_proto_msgTypes[17].OneofWrappers = []any{
 		(*JobEvent_Started)(nil),
 		(*JobEvent_Cycle)(nil),
 		(*JobEvent_Finished)(nil),
 		(*JobEvent_Error)(nil),
+		(*JobEvent_SipResult)(nil),
 	}
-	file_prober_v1_agent_proto_msgTypes[18].OneofWrappers = []any{}
+	file_prober_v1_agent_proto_msgTypes[20].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_prober_v1_agent_proto_rawDesc), len(file_prober_v1_agent_proto_rawDesc)),
-			NumEnums:      5,
-			NumMessages:   22,
+			NumEnums:      6,
+			NumMessages:   24,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

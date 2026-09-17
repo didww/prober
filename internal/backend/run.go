@@ -25,10 +25,11 @@ func NewManager(gw *Gateway, ttl time.Duration) *Manager {
 	return &Manager{gw: gw, ttl: ttl, runs: make(map[string]*Run)}
 }
 
-// Start creates a run, dispatches one job per site, and returns it. Sites
-// with no connected agent get an immediate error event rather than failing
-// the whole run.
-func (m *Manager) Start(spec *pb.TraceSpec, sites []string) *Run {
+// Start creates a run, dispatches one job per site, and returns it. newJob
+// builds the StartJob for a given job id, so the run manager stays agnostic of
+// the probe kind (trace, SIP, …). Sites with no connected agent get an
+// immediate error event rather than failing the whole run.
+func (m *Manager) Start(newJob func(jobID string) *pb.StartJob, sites []string) *Run {
 	runID := uuid.NewString()
 	r := &Run{
 		ID:      runID,
@@ -56,7 +57,7 @@ func (m *Manager) Start(spec *pb.TraceSpec, sites []string) *Run {
 			delete(r.pending, jobID)
 			continue
 		}
-		if err := m.gw.StartJob(site, jobID, spec, r); err != nil {
+		if err := m.gw.StartJob(site, newJob(jobID), r); err != nil {
 			r.emit(&pb.JobEvent{
 				JobId: jobID,
 				Time:  timestamppb.Now(),

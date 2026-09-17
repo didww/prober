@@ -48,14 +48,17 @@ spec:
               containerPort: {{ include "prober-backend.httpPort" . }}
             - name: grpc
               containerPort: {{ include "prober-backend.grpcPort" . }}
-            {{- if .Values.metricsPort }}
+            {{- if include "prober-backend.metricsPort" . }}
             - name: metrics
-              containerPort: {{ .Values.metricsPort }}
+              containerPort: {{ include "prober-backend.metricsPort" . }}
             {{- end }}
+          {{- if include "prober-backend.metricsPort" . }}
+          # /readyz and /healthz are served on the metrics listener.
           readinessProbe:
             httpGet: { path: /readyz, port: metrics }
           livenessProbe:
             httpGet: { path: /healthz, port: metrics }
+          {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:

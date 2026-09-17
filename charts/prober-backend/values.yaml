@@ -67,9 +67,6 @@ service:
   grpcPort: 50051
   annotations: {}
 
-# Metrics port is scraped from the pod directly (a PodMonitor), not the Service.
-metricsPort: 9108
-
 podAnnotations: {}
 podLabels: {}
 podSecurityContext:

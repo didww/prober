@@ -70,7 +70,9 @@ one from tls.cert/tls.key. Empty when TLS is supplied inline in the config. */}}
 {{- end -}}
 
 {{- define "prober-backend.metricsPort" -}}
-{{- .Values.metricsPort -}}
+{{- with .Values.config.listen.metrics -}}
+{{- last (splitList ":" .) -}}
+{{- end -}}
 {{- end -}}
 
 {{- define "prober-backend.metricsPath" -}}

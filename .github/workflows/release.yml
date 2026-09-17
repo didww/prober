@@ -21,6 +21,13 @@ jobs:
     # dpkg-deb from a trixie userland — the same reason vlui does this.
     container:
       image: debian:trixie
+    # A bare debian image has the C/POSIX locale, so Ruby's default encoding is
+    # US-ASCII — and deb-s3 then crashes on the first non-ASCII byte in the S3
+    # Packages manifest (any tool's UTF-8 description). C.UTF-8 is built into
+    # glibc; no locales package needed.
+    env:
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
     steps:
       # A bare debian image lacks what the checkout/setup actions assume.
       - name: Install build prerequisites

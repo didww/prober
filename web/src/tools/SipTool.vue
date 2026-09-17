@@ -28,9 +28,8 @@ onBeforeUnmount(stop)
 const canSend = computed(() => form.target.trim() !== '' && form.sites.length > 0)
 
 // The default port shown as a placeholder for the chosen transport.
-const portPlaceholder = computed(() =>
-  form.transport === 'tls' ? '5061' : form.transport === 'wss' ? '443' : '5060',
-)
+const DEFAULT_PORTS: Record<SipTransport, string> = { udp: '5060', tcp: '5060', tls: '5061', wss: '443' }
+const portPlaceholder = computed(() => DEFAULT_PORTS[form.transport])
 
 function toggleSite(site: string) {
   const i = form.sites.indexOf(site)
@@ -91,15 +90,19 @@ function statusLabel(s: SiteState): string {
 <template>
   <div class="sip">
     <form class="bar" @submit.prevent="submit">
-      <input v-model="form.target" class="ctl target" placeholder="SIP host or IP" autofocus spellcheck="false" />
-      <select v-model="form.transport" class="ctl">
+      <label for="sip-target" class="sr-only">SIP target host or IP</label>
+      <input id="sip-target" v-model="form.target" class="ctl target" placeholder="SIP host or IP" spellcheck="false" />
+      <label for="sip-transport" class="sr-only">Transport</label>
+      <select id="sip-transport" v-model="form.transport" class="ctl">
         <option value="udp">UDP</option>
         <option value="tcp">TCP</option>
         <option value="tls">TLS</option>
         <option value="wss">WSS</option>
       </select>
-      <input v-model.number="form.port" class="ctl port" type="number" min="1" max="65535" :placeholder="portPlaceholder" />
-      <select v-model="form.family" class="ctl">
+      <label for="sip-port" class="sr-only">Port</label>
+      <input id="sip-port" v-model.number="form.port" class="ctl port" type="number" min="1" max="65535" :placeholder="portPlaceholder" />
+      <label for="sip-family" class="sr-only">IP version</label>
+      <select id="sip-family" v-model="form.family" class="ctl">
         <option value="">v4/v6</option>
         <option value="4">IPv4</option>
         <option value="6">IPv6</option>
@@ -133,7 +136,16 @@ function statusLabel(s: SiteState): string {
       </div>
 
       <template v-for="s in rows" :key="s.site">
-        <div class="row" :class="s.status" @click="s.expanded = !s.expanded">
+        <div
+          class="row"
+          :class="s.status"
+          role="button"
+          tabindex="0"
+          :aria-expanded="s.expanded"
+          @click="s.expanded = !s.expanded"
+          @keydown.enter="s.expanded = !s.expanded"
+          @keydown.space.prevent="s.expanded = !s.expanded"
+        >
           <span class="c-site"><span class="caret" :class="{ open: s.expanded }">▶</span>{{ s.site }}</span>
           <span class="c-ip">
             <span class="ip">{{ s.resolved || '—' }}</span>
@@ -215,6 +227,7 @@ function statusLabel(s: SiteState): string {
 .head { color: var(--fg-dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; border-bottom: 1px solid var(--line); }
 .row { border-bottom: 1px solid var(--line); cursor: pointer; }
 .row:hover { background: var(--hover); }
+.row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .c-n { text-align: right; font-variant-numeric: tabular-nums; }
 .c-code { font-variant-numeric: tabular-nums; font-weight: 600; }
 .c-code.ok { color: var(--ok); }
@@ -246,7 +259,7 @@ function statusLabel(s: SiteState): string {
 .pane-h { font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--fg-dim); margin-bottom: 4px; }
 .pane pre {
   margin: 0; padding: 8px 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
-  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word;
+  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere;
   max-height: 320px; overflow: auto;
 }
 @media (max-width: 720px) { .panes { grid-template-columns: 1fr; } }

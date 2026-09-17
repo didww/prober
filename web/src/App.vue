@@ -127,6 +127,19 @@ body {
   color: var(--fg);
   font: 14px/1.5 system-ui, -apple-system, sans-serif;
 }
+
+/* Visually hidden but available to screen readers and label associations. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 </style>
 
 <style scoped>

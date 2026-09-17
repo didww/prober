@@ -85,7 +85,7 @@ watch(open, (isOpen) => {
   gap: 2px;
   padding-bottom: 8px;
   font-size: 12px;
-  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 .muted { color: var(--fg-dim); }
 .out {

@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net"
 	"net/netip"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -148,5 +149,37 @@ func TestNormalizeDefaults(t *testing.T) {
 	}
 	if _, err := (Spec{}).normalize(); err == nil {
 		t.Fatal("missing target must fail")
+	}
+}
+
+// TestFromHeaderCleanWithVersionedUA guards a regression: sipgo builds the From
+// display name AND the From URI user part from its UA name, so passing a
+// versioned User-Agent (e.g. "prober/1.2.0") once put a slash inside the From
+// URI user part ("sip:prober/1.2.0@..."), which is invalid. The version must
+// ride in the User-Agent header only; the From identity stays a bare token.
+func TestFromHeaderCleanWithVersionedUA(t *testing.T) {
+	ap, _ := startServer(t, "udp", 200, "OK")
+	spec := Spec{
+		Target:    ap.Addr(),
+		Port:      ap.Port(),
+		Transport: UDP,
+		Cycles:    1,
+		Interval:  150 * time.Millisecond,
+		Timeout:   2 * time.Second,
+		UserAgent: "prober/1.2.0",
+	}
+	rs := results(t, run(t, spec))
+	if len(rs) != 1 {
+		t.Fatalf("got %d results, want 1", len(rs))
+	}
+	req := rs[0].Request
+	if !strings.Contains(req, "sip:"+fromIdentity+"@") {
+		t.Fatalf("From URI user part not clean; request:\n%s", req)
+	}
+	if strings.Contains(req, "sip:prober/1.2.0@") {
+		t.Fatalf("versioned UA leaked into From URI user part; request:\n%s", req)
+	}
+	if !strings.Contains(req, "User-Agent: prober/1.2.0") {
+		t.Fatalf("version not carried in User-Agent header; request:\n%s", req)
 	}
 }

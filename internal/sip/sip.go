@@ -101,6 +101,10 @@ const (
 	DefaultInterval  = time.Second
 	DefaultTimeout   = 5 * time.Second
 	DefaultUserAgent = "prober"
+	// fromIdentity is the SIP From user and display name. It stays a bare
+	// token (no version, no slash) so the From URI user part is always valid;
+	// the software version is carried in the User-Agent header instead.
+	fromIdentity = "prober"
 )
 
 func (s Spec) normalize() (Spec, error) {
@@ -194,7 +198,11 @@ func Run(ctx context.Context, spec Spec, log *slog.Logger, emit func(Event)) err
 	tlsValid := false
 	tlsErr := ""
 
-	uaOpts := []sipgo.UserAgentOption{sipgo.WithUserAgent(spec.UserAgent)}
+	// WithUserAgent sets sipgo's UA name, which it uses for BOTH the From
+	// display name and the From URI user part. Feed it the clean identity, not
+	// spec.UserAgent (e.g. "prober/1.2.0"), whose slash would land inside the
+	// From URI user part. The version travels in the explicit User-Agent header.
+	uaOpts := []sipgo.UserAgentOption{sipgo.WithUserAgent(fromIdentity)}
 	if spec.Transport.tlsBased() {
 		serverName := spec.Target.String()
 		conf := &tls.Config{

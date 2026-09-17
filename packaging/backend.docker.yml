@@ -1,0 +1,12 @@
+# Default in-container config for prober-backend. A real deployment mounts its
+# own over this (the Helm chart does). Listens on all interfaces, since a
+# loopback listener inside a network namespace is reachable from nothing.
+listen:
+  grpc:
+    addr: "0.0.0.0:50051"
+    cert_file: /etc/prober/tls/tls.crt
+    key_file: /etc/prober/tls/tls.key
+  http: "0.0.0.0:8080"
+  metrics: "0.0.0.0:9108"
+# agents: []          # site -> token, provided by the deployment
+# auth: { enabled: false }

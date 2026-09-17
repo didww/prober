@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>prober</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <script>
+      // Stamp the theme before first paint, so a dark-theme reload does not
+      // flash a light page for one frame.
+      (function () {
+        try {
+          var m = localStorage.getItem('prober.theme') || 'auto'
+          var dark =
+            m === 'dark' ||
+            (m === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+          document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+        } catch (e) {
+          /* private mode: fall back to the stylesheet's media query */
+        }
+      })()
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

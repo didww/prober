@@ -1,0 +1,13 @@
+/prober-agent
+/prober-backend
+/dist/
+/web/node_modules/
+/web/dist/*
+!/web/dist/.gitkeep
+*.deb
+*.tgz
+/config.yml
+/agent.yml
+dev/*.key
+dev/*.crt
+dev/*.srl

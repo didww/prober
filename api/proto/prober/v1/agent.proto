@@ -1,0 +1,260 @@
+// The agent stream: the single contract between a prober-agent at a PoP and
+// the prober-backend.
+//
+// The agent dials the backend and holds one long-lived bidirectional stream.
+// Everything travels on it: the agent's Hello and heartbeats, the backend's
+// jobs and cancellations, and the agent's job events. There is no other RPC.
+//
+// Jobs and events are oneofs on purpose. A browser-started trace, a scheduled
+// monitor trace and a future SIP OPTIONS check are all "a job with a spec"
+// and "events tagged by job id", so later probe kinds add oneof cases and
+// change nothing else.
+syntax = "proto3";
+
+package prober.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/didww/prober/api/gen/prober/v1;proberv1";
+
+service AgentGateway {
+  // Session is opened by the agent and lives as long as the agent does. The
+  // agent sends Hello first; the backend answers Welcome, after which either
+  // side may send at any time. Authentication is a bearer token in the
+  // stream metadata; the site is derived from that token on the backend, and
+  // the site in Hello is only cross-checked.
+  rpc Session(stream AgentMessage) returns (stream BackendMessage);
+}
+
+message AgentMessage {
+  oneof msg {
+    Hello hello = 1;
+    Heartbeat heartbeat = 2;
+    JobEvent event = 3;
+  }
+}
+
+message BackendMessage {
+  oneof msg {
+    Welcome welcome = 1;
+    StartJob start = 2;
+    CancelJob cancel = 3;
+    // Assignment and Ack are the stage-2 monitoring messages. Defined now so
+    // the wire shape is settled; no stage-1 code sends or handles them.
+    Assignment assignment = 4;
+    Ack ack = 5;
+  }
+}
+
+// Hello is the first message on a stream.
+message Hello {
+  string site = 1;
+  string version = 2;
+  string commit = 3;
+  string hostname = 4;
+  Capabilities capabilities = 5;
+  Limits limits = 6;
+  google.protobuf.Timestamp started_at = 7;
+}
+
+// Capabilities is what this agent's host can actually do, probed at startup.
+message Capabilities {
+  bool ipv4 = 1;
+  bool ipv6 = 2;
+  bool icmp = 3;
+  bool udp = 4;
+  bool tcp = 5;
+  // Addresses a trace may be sourced from, for multi-homed PoPs.
+  repeated string source_addresses = 6;
+}
+
+// Limits is what the agent will refuse beyond. The backend clamps requests to
+// these before sending a job, so a refusal is a bug rather than a user error.
+message Limits {
+  uint32 max_concurrent_jobs = 1;
+  uint32 max_cycles = 2;
+  uint32 min_interval_ms = 3;
+  uint32 max_ttl = 4;
+}
+
+message Heartbeat {
+  google.protobuf.Timestamp time = 1;
+  uint32 active_jobs = 2;
+}
+
+// Welcome confirms the session. The site is authoritative: it comes from the
+// token the backend matched, not from the agent's Hello.
+message Welcome {
+  string site = 1;
+  google.protobuf.Timestamp time = 2;
+  uint32 heartbeat_interval_ms = 3;
+}
+
+message StartJob {
+  string job_id = 1;
+  oneof spec {
+    TraceSpec trace = 10;
+  }
+}
+
+message CancelJob {
+  string job_id = 1;
+}
+
+// Assignment is the full list of monitors an agent should run on its own
+// schedule. Always the whole list: the agent replaces its schedule when the
+// version changes, so reconnect needs no reconciliation.
+message Assignment {
+  uint64 version = 1;
+  repeated Monitor monitors = 2;
+}
+
+message Monitor {
+  string id = 1;
+  uint32 interval_s = 2;
+  oneof spec {
+    TraceSpec trace = 10;
+  }
+}
+
+// Ack tells the agent which event sequence the backend has durably handled,
+// so an agent buffering results while disconnected can discard up to it.
+message Ack {
+  uint64 seq = 1;
+}
+
+enum Protocol {
+  PROTOCOL_UNSPECIFIED = 0;
+  PROTOCOL_ICMP = 1;
+  PROTOCOL_UDP = 2;
+  PROTOCOL_TCP = 3;
+}
+
+enum AddressFamily {
+  // Unspecified means "whatever the target resolves to", IPv6 preferred when
+  // both exist and the host has IPv6.
+  ADDRESS_FAMILY_UNSPECIFIED = 0;
+  ADDRESS_FAMILY_IPV4 = 1;
+  ADDRESS_FAMILY_IPV6 = 2;
+}
+
+enum TraceMode {
+  TRACE_MODE_UNSPECIFIED = 0;
+  // MTR probes every TTL from first_ttl up to where the target answers.
+  TRACE_MODE_MTR = 1;
+  // PING probes only the target, at max_ttl: the ping.pe front page.
+  TRACE_MODE_PING = 2;
+}
+
+// TraceSpec is one trace as the user asked for it. Zero values mean "agent
+// default" for every numeric field.
+message TraceSpec {
+  string target = 1;
+  Protocol protocol = 2;
+  AddressFamily family = 3;
+  // Destination port for UDP and TCP. Ignored for ICMP.
+  uint32 port = 4;
+  // Reverse-resolve hop addresses. Names arrive asynchronously in later
+  // cycles as lookups complete.
+  bool resolve_names = 5;
+  uint32 cycles = 6;
+  uint32 interval_ms = 7;
+  uint32 first_ttl = 8;
+  uint32 max_ttl = 9;
+  // Probe payload size in bytes.
+  uint32 packet_size = 10;
+  // DSCP value (0-63), written into the IP TOS / IPv6 traffic class.
+  uint32 dscp = 11;
+  // Source address to send from; empty picks the routing default.
+  string source = 12;
+  TraceMode mode = 13;
+  // How long a probe may stay unanswered before it counts as lost.
+  uint32 probe_timeout_ms = 14;
+}
+
+// JobEvent is anything an agent reports about a job. Every event carries the
+// agent's clock and a per-agent monotonic sequence, so the backend can store
+// or deduplicate events without state about the job.
+message JobEvent {
+  string job_id = 1;
+  uint64 seq = 2;
+  google.protobuf.Timestamp time = 3;
+  oneof event {
+    JobStarted started = 10;
+    Cycle cycle = 11;
+    JobFinished finished = 12;
+    JobError error = 13;
+  }
+}
+
+// JobStarted is sent once the target resolved and probing began.
+message JobStarted {
+  string target = 1;
+  // The address actually probed. It can differ per site for anycast and
+  // GeoDNS targets, which is why the UI shows it per row.
+  string resolved = 2;
+  string source = 3;
+  Protocol protocol = 4;
+  AddressFamily family = 5;
+}
+
+// Cycle is emitted once per cycle with every hop's sample and its running
+// aggregates. One event per site per cycle keeps the stream small.
+message Cycle {
+  uint32 number = 1;
+  // TTL at which the target answered, 0 while not yet reached.
+  uint32 reached_at = 2;
+  repeated Hop hops = 3;
+}
+
+message Hop {
+  // The TTL this hop was probed with.
+  uint32 ttl = 1;
+  // Every address that has answered at this TTL, first seen first. More than
+  // one means ECMP.
+  repeated HopAddress addresses = 2;
+  // This cycle's sample. Unset means the probe was lost or is still pending
+  // at the time the cycle closed.
+  optional uint32 sample_us = 3;
+  uint32 sent = 4;
+  uint32 received = 5;
+  double loss_pct = 6;
+  uint32 last_us = 7;
+  uint32 best_us = 8;
+  uint32 avg_us = 9;
+  uint32 worst_us = 10;
+  uint32 stdev_us = 11;
+  uint32 jitter_us = 12;
+}
+
+message HopAddress {
+  string ip = 1;
+  // Reverse name, empty until resolved or when resolve_names is off.
+  string name = 2;
+  // Replies seen from this address.
+  uint32 count = 3;
+}
+
+message JobFinished {
+  uint32 cycles = 1;
+  enum Reason {
+    REASON_UNSPECIFIED = 0;
+    REASON_COMPLETED = 1;
+    REASON_CANCELLED = 2;
+  }
+  Reason reason = 2;
+}
+
+// JobError ends a job that could not run or run to completion: resolution
+// failed, the policy refused the target, the engine hit a socket error.
+message JobError {
+  enum Code {
+    CODE_UNSPECIFIED = 0;
+    CODE_RESOLVE = 1;
+    CODE_POLICY = 2;
+    CODE_LIMIT = 3;
+    CODE_ENGINE = 4;
+  }
+  Code code = 1;
+  string message = 2;
+}

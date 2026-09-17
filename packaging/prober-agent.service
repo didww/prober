@@ -1,0 +1,44 @@
+[Unit]
+Description=prober-agent — PoP probing agent for the prober looking glass
+Documentation=https://github.com/didww/prober
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+
+# The one privilege the agent needs: raw ICMP sockets. Granted as an ambient
+# capability so a non-root transient user actually holds it, and bounded so it
+# is the ONLY capability the process can ever have.
+AmbientCapabilities=CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_RAW
+
+# The config holds the per-agent bearer token, so it stays root-only.
+LoadCredential=config:/opt/prober-agent/etc/config.yml
+ExecStart=/opt/prober-agent/bin/prober-agent -config %d/config
+
+Restart=on-failure
+RestartSec=5s
+UMask=0077
+
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictAddressFamilies=AF_INET AF_INET6 AF_NETLINK
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

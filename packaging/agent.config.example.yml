@@ -1,0 +1,16 @@
+# prober-agent configuration. Runs at a PoP; dials the backend and needs
+# CAP_NET_RAW.
+backend:
+  address: "prober-backend.example.com:50051"
+  site: fra
+  token_file: /opt/prober-agent/etc/token
+  ca_file: /opt/prober-agent/etc/backend-ca.pem
+  # ca: |                      # inline CA instead of ca_file
+  # server_name: prober-backend.example.com
+  # insecure_skip_verify: false
+
+limits:
+  max_concurrent_jobs: 20
+  max_cycles: 1000
+  min_interval_ms: 100
+  max_ttl: 40

@@ -1,0 +1,7 @@
+# Default in-container config for prober-agent. A real deployment mounts its
+# own over this (the Helm chart does).
+backend:
+  address: "prober-backend:50051"
+  site: "unset"
+  token_file: /etc/prober/token
+  ca_file: /etc/prober/backend-ca.pem

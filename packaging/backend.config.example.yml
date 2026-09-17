@@ -1,0 +1,30 @@
+# prober-backend configuration.
+#
+# Three listeners: gRPC for agents (TLS + per-agent token), HTTP for the
+# browser (SPA + REST + SSE, optional OIDC), and Prometheus metrics.
+listen:
+  grpc:
+    addr: "0.0.0.0:50051"
+    cert_file: /opt/prober-backend/etc/tls.crt
+    key_file: /opt/prober-backend/etc/tls.key
+  http: "0.0.0.0:8080"
+  metrics: "127.0.0.1:9108"
+
+# base_path: /prober          # mount the UI under a sub-path (behind nginx)
+
+# Each agent authenticates with a bearer token that maps to its site.
+agents:
+  - site: fra
+    token: "CHANGEME-fra-token"
+  - site: ams
+    token: "CHANGEME-ams-token"
+
+# OIDC login for the UI. Off means every browser request is anonymous.
+auth:
+  enabled: false
+  # issuer: https://idp.example.com/realms/ops
+  # client_id: prober
+  # client_secret: ""
+  # redirect_url: https://prober.example.com/api/auth/callback
+  # cookie_secret: ""          # >= 32 bytes: openssl rand -hex 32
+  # allowed_groups: [noc]

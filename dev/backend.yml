@@ -1,0 +1,25 @@
+# Local dev config for prober-backend. See dev/gen-certs.sh for the certs.
+listen:
+  grpc:
+    addr: "127.0.0.1:50051"
+    cert_file: dev/backend.crt
+    key_file: dev/backend.key
+  http: "127.0.0.1:8080"
+  metrics: "127.0.0.1:9108"
+
+agents:
+  - site: local
+    token: dev-token-local
+
+# OIDC login for the browser UI. Off here; the agent gRPC listener is
+# unaffected (it uses its own per-agent token). To enable, uncomment and point
+# at your provider — everything else is read from its discovery document.
+# auth:
+#   enabled: true
+#   issuer: https://idp.example.com/realms/ops
+#   client_id: prober
+#   client_secret: ""
+#   redirect_url: http://127.0.0.1:8080/api/auth/callback
+#   cookie_secret: ""          # >= 32 bytes: openssl rand -hex 32
+#   secure_cookie: false       # localhost over http only
+#   allowed_groups: [noc]      # require one of these in the groups claim

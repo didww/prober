@@ -1,0 +1,8 @@
+prober-backend is deployed.
+
+  Service:  {{ include "prober-backend.fullname" . }}
+  UI:       http  on port {{ .Values.service.httpPort }}
+  Agents:   gRPC (TLS) on port {{ .Values.service.grpcPort }}
+
+Point agents at the gRPC port with their per-agent token. If auth is enabled,
+the redirect_url must match what your IdP has registered.

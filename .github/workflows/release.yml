@@ -1,0 +1,188 @@
+name: Release
+
+# A published GitHub release, not a bare tag: the release is the thing an
+# operator points at, and its notes are written by a human.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write # attach artifacts to the release
+  packages: write # push images and charts to ghcr.io
+
+jobs:
+  # ------------------------------------------------------------------ debs
+  deb:
+    name: Debian packages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build the SPA (embedded in the backend)
+        working-directory: web
+        run: npm ci && npm run build
+
+      - name: Version
+        id: v
+        run: |
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          echo "commit=$(echo "$GITHUB_SHA" | cut -c1-7)" >> "$GITHUB_OUTPUT"
+
+      - name: Build static binaries (amd64)
+        env: { CGO_ENABLED: "0", GOOS: linux, GOARCH: amd64 }
+        run: |
+          LDFLAGS="-s -w -X main.version=${{ steps.v.outputs.version }} -X main.commit=${{ steps.v.outputs.commit }}"
+          go build -buildvcs=false -ldflags="$LDFLAGS" -o build/prober-backend ./cmd/prober-backend
+          go build -buildvcs=false -ldflags="$LDFLAGS" -o build/prober-agent   ./cmd/prober-agent
+
+      - name: Assemble .deb packages
+        env: { VERSION: "${{ steps.v.outputs.version }}" }
+        run: |
+          for pkg in prober-backend prober-agent; do
+            short="${pkg#prober-}"          # backend / agent
+            dir="${pkg}_${VERSION}_amd64"
+            install -d "$dir/DEBIAN" "$dir/opt/$pkg/bin" "$dir/opt/$pkg/etc" "$dir/lib/systemd/system"
+            install -m 0755 "build/$pkg"                              "$dir/opt/$pkg/bin/$pkg"
+            install -m 0644 "packaging/$short.config.example.yml"     "$dir/opt/$pkg/etc/config.example.yml"
+            install -m 0644 "packaging/$pkg.service"                  "$dir/lib/systemd/system/$pkg.service"
+            cat > "$dir/DEBIAN/control" <<CTL
+          Package: $pkg
+          Version: ${VERSION}
+          Architecture: amd64
+          Maintainer: DIDWW Engineering <engineering@didww.com>
+          Section: net
+          Priority: optional
+          Description: prober looking glass — $pkg
+           Native Go traceroute probing. See https://github.com/didww/prober
+          CTL
+            # Bake the package name into the shared maintainer scripts.
+            sed "s/@PKG@/$pkg/g" packaging/postinst.sh > "$dir/DEBIAN/postinst"
+            sed "s/@PKG@/$pkg/g" packaging/prerm.sh     > "$dir/DEBIAN/prerm"
+            chmod 0755 "$dir/DEBIAN/postinst" "$dir/DEBIAN/prerm"
+            dpkg-deb --build --root-owner-group "$dir"
+          done
+          ls -l *.deb
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: "*.deb"
+
+      - name: Upload to the DIDWW APT repository
+        uses: yeti-switch/upload-debian-pkg-action@v2
+        with:
+          pkgs: "*.deb"
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+          gpg_passphrase: ${{ secrets.GPG_PASSPHRASE }}
+          s3_codename: trixie
+          s3_prefix: prober
+          s3_access_key_id: ${{ secrets.DEB_AWS_ACCESS_KEY_ID }}
+          s3_secret_access_key: ${{ secrets.DEB_AWS_SECRET_ACCESS_KEY }}
+          s3_endpoint_url: ${{ secrets.DEB_AWS_ENDPOINT }}
+
+  # --------------------------------------------------------------- images
+  docker:
+    name: Container images
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        component: [prober-backend, prober-agent]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # Only the backend embeds the SPA, but building it for both is cheap and
+      # keeps the step identical.
+      - name: Build the SPA
+        working-directory: web
+        run: npm ci && npm run build
+
+      - name: Version
+        id: v
+        run: |
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          echo "commit=$(echo "$GITHUB_SHA" | cut -c1-7)" >> "$GITHUB_OUTPUT"
+
+      # Cross-compile in Go (a build flag) rather than cross-BUILD the container
+      # under QEMU (a whole emulated toolchain).
+      - name: Build static binaries (amd64 + arm64)
+        env: { CGO_ENABLED: "0", GOOS: linux }
+        run: |
+          LDFLAGS="-s -w -X main.version=${{ steps.v.outputs.version }} -X main.commit=${{ steps.v.outputs.commit }}"
+          for arch in amd64 arm64; do
+            GOARCH=$arch go build -buildvcs=false -ldflags="$LDFLAGS" \
+              -o dist/linux/$arch/${{ matrix.component }} ./cmd/${{ matrix.component }}
+          done
+
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/${{ matrix.component }}.Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/didww/${{ matrix.component }}:${{ steps.v.outputs.version }}
+            ghcr.io/didww/${{ matrix.component }}:latest
+          labels: |
+            org.opencontainers.image.source=https://github.com/didww/prober
+            org.opencontainers.image.version=${{ steps.v.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+  # ---------------------------------------------------------------- charts
+  helm:
+    name: Helm charts
+    runs-on: ubuntu-latest
+    # Charts default their image tag to the appVersion, so publishing a chart
+    # before its image would ship one whose default pull does not exist.
+    needs: docker
+    strategy:
+      matrix:
+        chart: [prober-backend, prober-agent]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with: { version: v3.16.3 }
+
+      - name: Version
+        id: v
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Lint and package
+        run: |
+          helm lint charts/${{ matrix.chart }}
+          helm package charts/${{ matrix.chart }} \
+            --version "${{ steps.v.outputs.version }}" \
+            --app-version "${{ steps.v.outputs.version }}"
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Push chart to GHCR
+        run: helm push "${{ matrix.chart }}-${{ steps.v.outputs.version }}.tgz" oci://ghcr.io/didww/charts
+
+      - name: Attach chart to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: "${{ matrix.chart }}-${{ steps.v.outputs.version }}.tgz"

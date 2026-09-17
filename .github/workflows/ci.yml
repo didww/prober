@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [go-rewrite, main]
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Format
+        run: |
+          unformatted=$(gofmt -l cmd internal)
+          if [ -n "$unformatted" ]; then echo "not gofmt'd:"; echo "$unformatted"; exit 1; fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Unit tests
+        run: go test ./...
+
+      # The engine's integration tests need raw ICMP sockets. GitHub's runners
+      # allow unprivileged user namespaces, so the tests run as root inside one
+      # with a network namespace of their own — no host capability needed.
+      - name: Engine integration tests (raw sockets in a namespace)
+        run: unshare -Urn sh -c 'ip link set lo up && go test -count=1 ./internal/trace/...'

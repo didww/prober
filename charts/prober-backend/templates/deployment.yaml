@@ -1,0 +1,88 @@
+{{- if not .Values.tls.secretName }}
+{{- fail "prober-backend: tls.secretName is required — the gRPC gateway must present a certificate to agents" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "prober-backend.fullname" . }}
+  labels:
+    {{- include "prober-backend.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "prober-backend.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include "prober-backend.renderedConfig" . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "prober-backend.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.serviceAccountName }}
+      serviceAccountName: {{ . }}
+      {{- end }}
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: prober-backend
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          args: ["-config", "/etc/prober/config.yml"]
+          ports:
+            - name: http
+              containerPort: {{ include "prober-backend.httpPort" . }}
+            - name: grpc
+              containerPort: {{ include "prober-backend.grpcPort" . }}
+            {{- if .Values.metricsPort }}
+            - name: metrics
+              containerPort: {{ .Values.metricsPort }}
+            {{- end }}
+          readinessProbe:
+            httpGet: { path: /readyz, port: metrics }
+          livenessProbe:
+            httpGet: { path: /healthz, port: metrics }
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prober/config.yml
+              subPath: config.yml
+              readOnly: true
+            - name: tls
+              mountPath: /etc/prober/tls
+              readOnly: true
+      volumes:
+        - name: config
+          secret:
+            secretName: {{ include "prober-backend.fullname" . }}-config
+            defaultMode: 0444
+        - name: tls
+          secret:
+            secretName: {{ .Values.tls.secretName }}
+            defaultMode: 0444
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

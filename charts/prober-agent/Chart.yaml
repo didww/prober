@@ -1,0 +1,14 @@
+apiVersion: v2
+name: prober-agent
+description: PoP probing agent for the prober looking glass — dials the backend and runs traces. Deploy one release per site.
+type: application
+version: 0.0.0
+appVersion: "0.0.0"
+kubeVersion: ">= 1.25.0-0"
+home: https://github.com/didww/prober
+sources:
+  - https://github.com/didww/prober
+maintainers:
+  - name: DIDWW Engineering
+    email: engineering@didww.com
+keywords: [traceroute, mtr, looking-glass, network, prober]

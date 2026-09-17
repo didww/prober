@@ -1,0 +1,7 @@
+prober-agent for site "{{ .Values.site }}" is deployed.
+
+It dials {{ .Values.backend.address }} and runs with hostNetwork={{ .Values.hostNetwork }}
+so its probes leave from the node's interface. It needs CAP_NET_RAW, added by
+the pod securityContext.
+
+Confirm it connected: the site should appear in the backend's /api/probers.

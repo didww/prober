@@ -1,0 +1,48 @@
+[Unit]
+Description=prober-backend — central service for the prober looking glass
+Documentation=https://github.com/didww/prober
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# A transient UID for the lifetime of the service; nothing on disk is owned by
+# it. The backend keeps no state of its own — runs live in memory, sessions in
+# a signed cookie.
+DynamicUser=yes
+
+# The config holds the cookie signing key, the OIDC client secret and the
+# per-agent tokens, so it stays root-only and is handed to the transient user
+# through a private tmpfs.
+LoadCredential=config:/opt/prober-backend/etc/config.yml
+ExecStart=/opt/prober-backend/bin/prober-backend -config %d/config
+
+Restart=on-failure
+RestartSec=5s
+UMask=0077
+
+# DynamicUser implies NoNewPrivileges, PrivateTmp, ProtectSystem=strict,
+# ProtectHome=read-only, RemoveIPC. The rest is not implied:
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,17 @@
+# Local dev config for prober-agent. Trusts the dev CA and connects as the
+# "local" site with the matching token.
+backend:
+  address: "127.0.0.1:50051"
+  site: local
+  token: dev-token-local
+  ca_file: dev/ca.crt
+  server_name: localhost
+  # Dev/testing only: skip verifying the backend certificate. The token then
+  # travels over an unauthenticated (though still encrypted) connection.
+  # insecure_skip_verify: false
+
+limits:
+  max_concurrent_jobs: 20
+  max_cycles: 1000
+  min_interval_ms: 100
+  max_ttl: 40

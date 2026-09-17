@@ -1,0 +1,72 @@
+# prober-backend Helm values.
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/didww/prober-backend
+  # Empty means the chart's appVersion (the release tag).
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+serviceAccountName: ""
+
+# The application config. It holds the per-agent tokens and (with auth on) the
+# OIDC client and cookie secrets, so the chart renders it into a Secret, not a
+# ConfigMap. The listen host parts are forced to 0.0.0.0 by the chart; the
+# ports below are respected.
+config:
+  listen:
+    grpc:
+      addr: "0.0.0.0:50051"
+      cert_file: /etc/prober/tls/tls.crt
+      key_file: /etc/prober/tls/tls.key
+    http: "0.0.0.0:8080"
+    metrics: "0.0.0.0:9108"
+  agents: []
+  #   - site: fra
+  #     token: "..."
+  auth:
+    enabled: false
+
+# The TLS keypair the gRPC gateway presents to agents. Provide a
+# kubernetes.io/tls Secret (cert-manager, or created by hand) and name it here;
+# it is mounted at /etc/prober/tls.
+tls:
+  secretName: ""
+
+service:
+  type: ClusterIP
+  httpPort: 8080
+  grpcPort: 50051
+  annotations: {}
+
+# Metrics port is scraped from the pod directly (a PodMonitor), not the Service.
+metricsPort: 9108
+
+podAnnotations: {}
+podLabels: {}
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    memory: 256Mi
+
+nodeSelector: {}
+affinity: {}
+tolerations: []

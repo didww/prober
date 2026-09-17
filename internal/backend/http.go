@@ -1,0 +1,253 @@
+package backend
+
+import (
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"strconv"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+
+	pb "github.com/didww/prober/api/gen/prober/v1"
+	"github.com/didww/prober/internal/auth"
+)
+
+// API is the browser-facing HTTP surface: the prober list, starting and
+// cancelling runs, and the SSE event stream. Auth (OIDC) is not wired here
+// yet.
+type API struct {
+	gw      *Gateway
+	mgr     *Manager
+	auth    *auth.Auth // nil when authentication is disabled
+	log     *slog.Logger
+	version string
+	commit  string
+}
+
+func NewAPI(gw *Gateway, mgr *Manager, a *auth.Auth, log *slog.Logger, version, commit string) *API {
+	return &API{gw: gw, mgr: mgr, auth: a, log: log, version: version, commit: commit}
+}
+
+func (a *API) Routes() http.Handler {
+	r := chi.NewRouter()
+	r.Use(middleware.Recoverer)
+	r.Use(middleware.RequestID)
+
+	// version and config are unauthenticated: the SPA shell asks who it is
+	// talking to (config.user) before it shows anything, and the version feeds
+	// the rail even on the login screen.
+	r.Get("/version", a.versionInfo)
+	r.Get("/config", a.appConfig)
+
+	// The OIDC endpoints sit OUTSIDE the middleware — logging in cannot require
+	// being logged in.
+	if a.auth != nil {
+		r.Mount("/auth", a.auth.Routes())
+	}
+
+	// Everything else is behind the session, when auth is on.
+	r.Group(func(r chi.Router) {
+		if a.auth != nil {
+			r.Use(a.auth.Middleware)
+		}
+		r.Get("/probers", a.probers)
+		r.Post("/runs", a.startRun)
+		r.Get("/runs/{id}/events", a.runEvents)
+		r.Delete("/runs/{id}", a.cancelRun)
+	})
+	return r
+}
+
+// appConfig is what the SPA fetches at boot: whether auth is on and, if so, who
+// the current user is. Reads the cookie directly rather than the middleware,
+// since it is unauthenticated.
+func (a *API) appConfig(w http.ResponseWriter, r *http.Request) {
+	out := struct {
+		Version     string     `json:"version"`
+		Commit      string     `json:"commit"`
+		AuthEnabled bool       `json:"auth_enabled"`
+		User        *auth.User `json:"user"`
+	}{Version: a.version, Commit: a.commit, AuthEnabled: a.auth != nil}
+	if a.auth != nil {
+		if u, ok := a.auth.Session(r); ok {
+			out.User = &u
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (a *API) versionInfo(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"version": a.version, "commit": a.commit})
+}
+
+func (a *API) probers(w http.ResponseWriter, r *http.Request) {
+	type prober struct {
+		Site     string `json:"site"`
+		Version  string `json:"version"`
+		Hostname string `json:"hostname"`
+		IPv4     bool   `json:"ipv4"`
+		IPv6     bool   `json:"ipv6"`
+	}
+	var out []prober
+	for _, h := range a.gw.Sites() {
+		p := prober{Site: h.Site, Version: h.Version, Hostname: h.Hostname}
+		if c := h.Capabilities; c != nil {
+			p.IPv4, p.IPv6 = c.Ipv4, c.Ipv6
+		}
+		out = append(out, p)
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+type startRequest struct {
+	Target   string   `json:"target"`
+	Sites    []string `json:"sites"`
+	Protocol string   `json:"protocol"`
+	Family   string   `json:"family"`
+	Port     uint32   `json:"port"`
+	Resolve  bool     `json:"resolve_names"`
+	Cycles   uint32   `json:"cycles"`
+	Mode     string   `json:"mode"`
+}
+
+func (a *API) startRun(w http.ResponseWriter, r *http.Request) {
+	var req startRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if req.Target == "" {
+		writeErr(w, http.StatusBadRequest, "target is required")
+		return
+	}
+	sites := req.Sites
+	if len(sites) == 0 {
+		for _, h := range a.gw.Sites() {
+			sites = append(sites, h.Site)
+		}
+	}
+	if len(sites) == 0 {
+		writeErr(w, http.StatusServiceUnavailable, "no agents connected")
+		return
+	}
+
+	spec := &pb.TraceSpec{
+		Target:       req.Target,
+		Protocol:     protoOf(req.Protocol),
+		Family:       familyOf(req.Family),
+		Port:         req.Port,
+		ResolveNames: req.Resolve,
+		Cycles:       req.Cycles,
+		Mode:         modeOf(req.Mode),
+	}
+	run := a.mgr.Start(spec, sites)
+	writeJSON(w, http.StatusCreated, map[string]any{"id": run.ID, "sites": sites})
+}
+
+func (a *API) cancelRun(w http.ResponseWriter, r *http.Request) {
+	a.mgr.Cancel(chi.URLParam(r, "id"))
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// runEvents streams a run's events as SSE, replaying from Last-Event-ID.
+func (a *API) runEvents(w http.ResponseWriter, r *http.Request) {
+	run, ok := a.mgr.Get(chi.URLParam(r, "id"))
+	if !ok {
+		writeErr(w, http.StatusNotFound, "no such run")
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeErr(w, http.StatusInternalServerError, "streaming unsupported")
+		return
+	}
+
+	var after uint64
+	if v := r.Header.Get("Last-Event-ID"); v != "" {
+		after, _ = strconv.ParseUint(v, 10, 64)
+	} else if v := r.URL.Query().Get("last_event_id"); v != "" {
+		after, _ = strconv.ParseUint(v, 10, 64)
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+
+	backlog, live, cancel := run.Subscribe(after)
+	defer cancel()
+
+	for _, se := range backlog {
+		writeSSE(w, se)
+	}
+	flusher.Flush()
+
+	ping := time.NewTicker(15 * time.Second)
+	defer ping.Stop()
+	ctx := r.Context()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case se, ok := <-live:
+			if !ok {
+				fmt.Fprintf(w, "event: done\ndata: {}\n\n")
+				flusher.Flush()
+				return
+			}
+			writeSSE(w, se)
+			flusher.Flush()
+		case <-ping.C:
+			fmt.Fprintf(w, ": keepalive\n\n")
+			flusher.Flush()
+		}
+	}
+}
+
+func writeSSE(w http.ResponseWriter, se *StreamEvent) {
+	data, typ, _ := eventJSON(se)
+	fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", se.Seq, typ, data)
+}
+
+func writeJSON(w http.ResponseWriter, code int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func writeErr(w http.ResponseWriter, code int, msg string) {
+	writeJSON(w, code, map[string]string{"error": msg})
+}
+
+func protoOf(s string) pb.Protocol {
+	switch s {
+	case "tcp", "TCP":
+		return pb.Protocol_PROTOCOL_TCP
+	case "udp", "UDP":
+		return pb.Protocol_PROTOCOL_UDP
+	default:
+		return pb.Protocol_PROTOCOL_ICMP
+	}
+}
+
+func familyOf(s string) pb.AddressFamily {
+	switch s {
+	case "4", "ipv4":
+		return pb.AddressFamily_ADDRESS_FAMILY_IPV4
+	case "6", "ipv6":
+		return pb.AddressFamily_ADDRESS_FAMILY_IPV6
+	default:
+		return pb.AddressFamily_ADDRESS_FAMILY_UNSPECIFIED
+	}
+}
+
+func modeOf(s string) pb.TraceMode {
+	if s == "ping" {
+		return pb.TraceMode_TRACE_MODE_PING
+	}
+	return pb.TraceMode_TRACE_MODE_MTR
+}

@@ -1,0 +1,66 @@
+# prober-agent Helm values. One release per site.
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/didww/prober-agent
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+serviceAccountName: ""
+
+# This agent's site id and how it reaches the backend.
+site: ""                        # required, e.g. "fra"
+backend:
+  address: ""                   # required, e.g. "prober-backend.example.com:50051"
+  token: ""                     # required unless existingSecret is set
+  # The backend's TLS trust. Give the CA inline, or leave empty to use the
+  # image's system roots (for a publicly-trusted backend certificate).
+  ca: ""
+  serverName: ""
+  insecureSkipVerify: false
+
+limits:
+  maxConcurrentJobs: 20
+  maxCycles: 1000
+  minIntervalMs: 100
+  maxTtl: 40
+
+# Provide the whole config.yml via an existing Secret (key config.yml) instead
+# of the values above — useful when the token comes from an external secret store.
+existingSecret: ""
+
+# The agent's probes must leave from the node's real interface, not the pod
+# overlay, or the first hop and source address are wrong.
+hostNetwork: true
+
+podAnnotations: {}
+podLabels: {}
+podSecurityContext:
+  seccompProfile:
+    type: RuntimeDefault
+# Raw sockets need CAP_NET_RAW. The distroless image runs as root (uid 0) with
+# every other capability dropped, which is what lets an added capability be
+# effective without file capabilities.
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: false
+  runAsUser: 0
+  capabilities:
+    drop: [ALL]
+    add: [NET_RAW]
+
+resources:
+  requests:
+    cpu: 25m
+    memory: 32Mi
+  limits:
+    memory: 128Mi
+
+nodeSelector: {}
+affinity: {}
+tolerations: []

@@ -75,7 +75,35 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	go watchReload(ctx, *configPath, srv, log)
 	return srv.Run(ctx)
+}
+
+// watchReload re-reads the config file on SIGHUP and applies the monitor set
+// (only that section is hot-reloaded). A bad reload is logged and the running
+// monitor set is kept.
+func watchReload(ctx context.Context, path string, srv *backend.Server, log *slog.Logger) {
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, syscall.SIGHUP)
+	defer signal.Stop(ch)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ch:
+			var cfg backend.Config
+			if err := loadYAML(path, &cfg); err != nil {
+				log.Error("reload: config read failed", "err", err)
+				continue
+			}
+			if err := cfg.Validate(); err != nil {
+				log.Error("reload: config invalid", "err", err)
+				continue
+			}
+			log.Info("SIGHUP: reloading monitors")
+			srv.ReloadMonitors(cfg.Monitors)
+		}
+	}
 }
 
 func loadYAML(path string, v any) error {

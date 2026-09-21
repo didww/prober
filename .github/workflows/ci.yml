@@ -34,4 +34,4 @@ jobs:
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
 
       - name: Engine integration tests (raw sockets in a namespace)
-        run: unshare -Urn sh -c 'ip link set lo up && go test -count=1 ./internal/trace/...'
+        run: unshare -Urn sh -c 'ip link set lo up && go test -count=1 ./internal/trace/... ./internal/backend/...'

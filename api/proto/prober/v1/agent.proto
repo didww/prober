@@ -117,8 +117,14 @@ message Assignment {
 message Monitor {
   string id = 1;
   uint32 interval_s = 2;
+  // labels are operator-defined dimensions (e.g. supplier, supplier_id) carried
+  // through to the metrics and log records the backend emits for this monitor.
+  map<string, string> labels = 3;
   oneof spec {
+    // A ping monitor is a TraceSpec with mode = PING; sip_options is its own
+    // spec. Both reuse the interactive engines on the agent.
     TraceSpec trace = 10;
+    SipOptionsSpec sip_options = 11;
   }
 }
 

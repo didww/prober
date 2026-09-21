@@ -9,9 +9,11 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/didww/prober/internal/auth"
+	"github.com/didww/prober/internal/vlog"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
@@ -30,6 +32,13 @@ type Server struct {
 	version string
 	commit  string
 
+	// Monitoring (stage 2): shared Prometheus registry, monitor registry, the
+	// metrics/log sink, and the VictoriaLogs shipper.
+	promReg *prometheus.Registry
+	reg     *MonitorRegistry
+	sink    *MonitorSink
+	vl      *vlog.Client
+
 	ready readyFlag
 }
 
@@ -39,6 +48,29 @@ type Server struct {
 func New(ctx context.Context, cfg Config, log *slog.Logger, version, commit string) (*Server, error) {
 	gw := NewGateway(cfg, log)
 	mgr := NewManager(gw, cfg.runTTL())
+
+	// Shared metrics registry: Go/process collectors plus the monitor metrics.
+	promReg := prometheus.NewRegistry()
+	promReg.MustRegister(
+		prometheus.NewGoCollector(),
+		prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}),
+	)
+	reg := NewMonitorRegistry(cfg.Monitors)
+	vl := vlog.New(vlog.Options{
+		URL:          cfg.VictoriaLogs.URL,
+		Username:     cfg.VictoriaLogs.Username,
+		Password:     cfg.VictoriaLogs.Password,
+		AccountID:    cfg.VictoriaLogs.AccountID,
+		ProjectID:    cfg.VictoriaLogs.ProjectID,
+		StreamFields: cfg.VictoriaLogs.StreamFields,
+		BatchMax:     cfg.VictoriaLogs.BatchMax,
+		Flush:        time.Duration(cfg.VictoriaLogs.FlushMS) * time.Millisecond,
+	}, log)
+	sink := NewMonitorSink(reg, vl, promReg)
+	gw.SetMonitoring(reg, sink)
+	if len(cfg.Monitors) > 0 {
+		log.Info("monitoring enabled", "monitors", len(cfg.Monitors), "victorialogs", vl.Enabled())
+	}
 
 	if cfg.AgentToken == "" && len(cfg.Agents) == 0 {
 		log.Warn("no agent auth configured: no agent can connect until you set agent_token (shared) or agents (per-site)")
@@ -67,6 +99,10 @@ func New(ctx context.Context, cfg Config, log *slog.Logger, version, commit stri
 		auth:    a,
 		version: version,
 		commit:  commit,
+		promReg: promReg,
+		reg:     reg,
+		sink:    sink,
+		vl:      vl,
 	}, nil
 }
 
@@ -101,6 +137,7 @@ func (s *Server) Run(ctx context.Context) error {
 		g.Go(func() error { return ignoreClosed(metricsSrv.ListenAndServe()) })
 	}
 	g.Go(func() error { s.mgr.Reap(ctx); return nil })
+	g.Go(func() error { s.vl.Run(ctx); return nil })
 
 	s.ready.set(true)
 	s.log.Info("prober-backend listening",
@@ -141,4 +178,15 @@ func ignoreClosed(err error) error {
 		return nil
 	}
 	return err
+}
+
+// ReloadMonitors swaps in a new monitor set (from a re-read config), bumps the
+// assignment version, prunes stale metric series, and re-pushes assignments to
+// all connected agents. Called on SIGHUP. Only the monitor set is hot-reloaded;
+// listeners and auth are untouched.
+func (s *Server) ReloadMonitors(mons []MonitorConfig) {
+	v := s.reg.Replace(mons)
+	s.sink.Retain()
+	s.gw.PushAssignments()
+	s.log.Info("monitors reloaded", "version", v, "monitors", len(mons))
 }

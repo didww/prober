@@ -47,6 +47,69 @@ type Config struct {
 	// RunTTL is how long a finished run's events stay replayable for a late
 	// or reconnecting browser. Zero means 5m.
 	RunTTL time.Duration `yaml:"run_ttl"`
+
+	// Monitors are the predefined targets agents probe on their own schedule
+	// (stage-2 monitoring). The backend pushes this list to each agent as a
+	// versioned Assignment on connect and on SIGHUP reload; results come back as
+	// ordinary job events and are turned into Prometheus metrics and, for
+	// trace/mtr, VictoriaLogs records.
+	Monitors []MonitorConfig `yaml:"monitors"`
+
+	// VictoriaLogs is where trace/mtr monitor results are shipped. Empty URL
+	// disables log shipping (metrics still work).
+	VictoriaLogs VictoriaLogsConfig `yaml:"victorialogs"`
+}
+
+// MonitorConfig is one predefined target and how often to probe it. Kind selects
+// the probe: "trace" (mtr), "ping" (single-hop RTT), or "sip" (SIP OPTIONS).
+// The kind-specific block (trace or sip) carries the probe parameters; a "ping"
+// monitor uses the trace block with mode forced to PING.
+type MonitorConfig struct {
+	ID        string `yaml:"id"`
+	Kind      string `yaml:"kind"`
+	Target    string `yaml:"target"`
+	IntervalS uint32 `yaml:"interval_s"`
+	// Sites restricts the monitor to those sites; empty means every agent runs it.
+	Sites  []string          `yaml:"sites"`
+	Labels map[string]string `yaml:"labels"`
+
+	Trace *TraceParams `yaml:"trace"`
+	SIP   *SipParams   `yaml:"sip"`
+}
+
+// TraceParams are the trace/ping probe parameters for a monitor.
+type TraceParams struct {
+	Protocol     string `yaml:"protocol"`
+	Family       string `yaml:"family"`
+	Port         uint32 `yaml:"port"`
+	Cycles       uint32 `yaml:"cycles"`
+	IntervalMS   uint32 `yaml:"interval_ms"`
+	FirstTTL     uint32 `yaml:"first_ttl"`
+	MaxTTL       uint32 `yaml:"max_ttl"`
+	ResolveNames bool   `yaml:"resolve_names"`
+}
+
+// SipParams are the SIP OPTIONS probe parameters for a monitor.
+type SipParams struct {
+	Transport  string `yaml:"transport"`
+	Family     string `yaml:"family"`
+	Port       uint32 `yaml:"port"`
+	Cycles     uint32 `yaml:"cycles"`
+	IntervalMS uint32 `yaml:"interval_ms"`
+	TimeoutMS  uint32 `yaml:"timeout_ms"`
+}
+
+// VictoriaLogsConfig points the trace/mtr log shipper at a VictoriaLogs
+// instance. Records are POSTed to {URL}/insert/jsonline as NDJSON.
+type VictoriaLogsConfig struct {
+	URL          string   `yaml:"url"`
+	Username     string   `yaml:"username"`
+	Password     string   `yaml:"password"`
+	AccountID    int      `yaml:"account_id"`
+	ProjectID    int      `yaml:"project_id"`
+	StreamFields []string `yaml:"stream_fields"`
+	BatchMax     int      `yaml:"batch_max"`
+	FlushMS      int      `yaml:"flush_interval_ms"`
 }
 
 type ListenConfig struct {
@@ -140,6 +203,41 @@ func (c Config) Validate() error {
 		}
 		seen[a.Site] = true
 		tokens[a.Token] = true
+	}
+	if err := validateMonitors(c.Monitors); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateMonitors checks the monitor list: unique non-empty ids, a target, a
+// positive interval, a known kind, and the matching kind-specific block.
+func validateMonitors(mons []MonitorConfig) error {
+	ids := map[string]bool{}
+	for i, m := range mons {
+		if m.ID == "" {
+			return fmt.Errorf("monitors[%d]: id is required", i)
+		}
+		if ids[m.ID] {
+			return fmt.Errorf("monitors[%d]: duplicate id %q", i, m.ID)
+		}
+		ids[m.ID] = true
+		if m.Target == "" {
+			return fmt.Errorf("monitors[%d] (%s): target is required", i, m.ID)
+		}
+		if m.IntervalS == 0 {
+			return fmt.Errorf("monitors[%d] (%s): interval_s must be > 0", i, m.ID)
+		}
+		switch m.Kind {
+		case "trace", "ping":
+			// trace block is optional; sensible defaults are applied.
+		case "sip":
+			// sip block is optional; sensible defaults are applied.
+		case "":
+			return fmt.Errorf("monitors[%d] (%s): kind is required (trace, ping or sip)", i, m.ID)
+		default:
+			return fmt.Errorf("monitors[%d] (%s): unknown kind %q", i, m.ID, m.Kind)
+		}
 	}
 	return nil
 }

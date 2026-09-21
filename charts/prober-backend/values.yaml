@@ -42,6 +42,31 @@ config:
   #     token: "..."
   auth:
     enabled: false
+  # Predefined monitoring (stage 2). Pushed to agents as a versioned assignment;
+  # results become prober_monitor_* metrics and (trace/mtr) VictoriaLogs records.
+  # This whole block flows through the config verbatim.
+  monitors: []
+  #   - id: supplier1-sip
+  #     kind: sip            # trace | ping | sip
+  #     target: 46.19.210.7
+  #     interval_s: 10
+  #     sites: [fra, ams]    # empty = every agent
+  #     labels: { supplier: supplier1 }
+  #     sip: { transport: udp, port: 5060, timeout_ms: 5000 }
+  #   - id: supplier1-mtr
+  #     kind: trace
+  #     target: 46.19.210.7
+  #     interval_s: 60
+  #     trace: { protocol: icmp, family: ipv4, max_ttl: 30, cycles: 1 }
+  victorialogs:
+    url: ""                  # e.g. http://vls-victoria-logs:9428 ; empty disables shipping
+    # username: ""
+    # password: ""
+    # account_id: 0
+    # project_id: 0
+    stream_fields: [site, monitor]
+    batch_max: 500
+    flush_interval_ms: 2000
 
 # The TLS keypair the gRPC gateway presents to agents. Three ways, in order of
 # preference for a cluster with certificate-expiry monitoring:

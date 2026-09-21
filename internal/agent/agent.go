@@ -254,6 +254,11 @@ func (a *Agent) session(ctx context.Context) error {
 
 	go a.heartbeat(sessCtx, send)
 
+	// The self-scheduled monitor runner for this session. The backend pushes a
+	// versioned Assignment (on connect and on reload); the scheduler owns the
+	// timers. It stops when sessCtx is cancelled on return.
+	sched := newScheduler(a, send)
+
 	for {
 		msg, err := stream.Recv()
 		if err != nil {
@@ -264,6 +269,8 @@ func (a *Agent) session(ctx context.Context) error {
 			a.startJob(sessCtx, m.Start, send)
 		case *pb.BackendMessage_Cancel:
 			a.jobs.cancel(m.Cancel.JobId)
+		case *pb.BackendMessage_Assignment:
+			sched.apply(sessCtx, m.Assignment)
 		case *pb.BackendMessage_Ping:
 			// Echo at once so the backend can measure the round trip.
 			_ = send(&pb.AgentMessage{Msg: &pb.AgentMessage_Pong{Pong: &pb.Pong{Nonce: m.Ping.Nonce}}})
@@ -541,4 +548,13 @@ func (j *jobTable) count() int {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	return len(j.m)
+}
+
+// has reports whether a job id is currently running. The scheduler uses it to
+// avoid overlapping a monitor's probe with its previous one.
+func (j *jobTable) has(id string) bool {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	_, ok := j.m[id]
+	return ok
 }

@@ -43,3 +43,44 @@ auth:
   # redirect_url: https://prober.example.com/api/auth/callback
   # cookie_secret: ""          # >= 32 bytes: openssl rand -hex 32
   # allowed_groups: [noc]
+
+# ---------------------------------------------------------------------------
+# Predefined monitoring (stage 2). The backend pushes this list to each agent
+# as a versioned assignment on connect and on SIGHUP reload; the agent runs the
+# probes on its own schedule and reports back. Results become Prometheus metrics
+# (prober_monitor_*), and trace/mtr hop detail is written to VictoriaLogs.
+#
+# kind: trace (mtr) | ping (single-hop RTT) | sip (SIP OPTIONS)
+# sites: optional; empty means every connected agent runs it.
+# labels: operator dimensions, exposed on prober_monitor_info and in the logs.
+monitors: []
+#   - id: supplier1-sip
+#     kind: sip
+#     target: 46.19.210.7
+#     interval_s: 10
+#     sites: [fra, ams]
+#     labels: { supplier: supplier1, supplier_id: "123" }
+#     sip: { transport: udp, port: 5060, timeout_ms: 5000 }
+#   - id: supplier1-mtr
+#     kind: trace
+#     target: 46.19.210.7
+#     interval_s: 60
+#     labels: { supplier: supplier1 }
+#     trace: { protocol: icmp, family: ipv4, max_ttl: 30, cycles: 1 }
+#   - id: gw-ping
+#     kind: ping
+#     target: 1.1.1.1
+#     interval_s: 15
+#     trace: { protocol: icmp, family: ipv4, cycles: 3 }
+
+# VictoriaLogs: where trace/mtr hop detail is shipped (one record per hop per
+# cycle). Empty url disables shipping; metrics still work.
+victorialogs:
+  url: ""                       # e.g. http://victorialogs:9428 (base, no /insert path)
+  # username: ""
+  # password: ""
+  # account_id: 0
+  # project_id: 0
+  stream_fields: [site, monitor]
+  batch_max: 500
+  flush_interval_ms: 2000

@@ -31,6 +31,19 @@ type Gateway struct {
 	mu     sync.RWMutex
 	agents map[string]*agentConn // site -> connection
 	sinks  map[string]EventSink  // job id -> where its events go
+
+	// Monitoring (stage 2). Set once at startup via SetMonitoring; nil disables
+	// assignment push and monitor-event routing.
+	reg         *MonitorRegistry
+	monitorSink *MonitorSink
+}
+
+// SetMonitoring wires the monitor registry and sink into the gateway. Call it
+// once before serving. When set, the gateway pushes each agent its Assignment on
+// connect and routes "mon:" job events to the sink.
+func (g *Gateway) SetMonitoring(reg *MonitorRegistry, sink *MonitorSink) {
+	g.reg = reg
+	g.monitorSink = sink
 }
 
 // EventSink receives an agent's events for one job. The run manager
@@ -67,6 +80,9 @@ type agentConn struct {
 	connectedAt time.Time
 
 	sendMu sync.Mutex
+
+	// assignmentVersion is the last Assignment version pushed to this agent.
+	assignmentVersion uint64
 
 	// Round-trip latency, measured with Ping/Pong on the stream.
 	pingMu     sync.Mutex
@@ -203,6 +219,18 @@ func (g *Gateway) Session(stream pb.AgentGateway_SessionServer) error {
 		return err
 	}
 
+	// Push the monitor assignment for this site (stage 2). The agent replaces
+	// its whole schedule with this list; nothing more is sent until config
+	// reload bumps the version.
+	if g.reg != nil {
+		as := g.reg.AssignmentFor(site)
+		if err := conn.send(&pb.BackendMessage{Msg: &pb.BackendMessage_Assignment{Assignment: as}}); err != nil {
+			return err
+		}
+		conn.assignmentVersion = as.Version
+		g.log.Info("pushed assignment", "site", site, "version", as.Version, "monitors", len(as.Monitors))
+	}
+
 	// Measure the round trip: one ping now, then every 10s, until the stream
 	// ends. rttUs starts at -1 (unknown) until the first Pong.
 	conn.rttUs.Store(-1)
@@ -221,7 +249,7 @@ func (g *Gateway) Session(stream pb.AgentGateway_SessionServer) error {
 		}
 		switch m := msg.Msg.(type) {
 		case *pb.AgentMessage_Event:
-			g.route(m.Event)
+			g.route(site, m.Event)
 		case *pb.AgentMessage_Pong:
 			conn.onPong(m.Pong.Nonce)
 		case *pb.AgentMessage_Heartbeat:
@@ -252,12 +280,43 @@ func (g *Gateway) removeAgent(site string, c *agentConn) {
 	}
 }
 
-func (g *Gateway) route(ev *pb.JobEvent) {
+func (g *Gateway) route(site string, ev *pb.JobEvent) {
+	// Self-scheduled monitor events never went through the run manager, so they
+	// have no per-job sink; route them to the monitoring sink by their id prefix.
+	if isMonitorJob(ev.JobId) {
+		if g.monitorSink != nil {
+			g.monitorSink.OnMonitorEvent(site, ev)
+		}
+		return
+	}
 	g.mu.RLock()
 	sink := g.sinks[ev.JobId]
 	g.mu.RUnlock()
 	if sink != nil {
 		sink.OnEvent(ev)
+	}
+}
+
+// PushAssignments re-pushes the current assignment to every connected agent.
+// Called after a config reload bumps the registry version.
+func (g *Gateway) PushAssignments() {
+	if g.reg == nil {
+		return
+	}
+	g.mu.RLock()
+	conns := make([]*agentConn, 0, len(g.agents))
+	for _, c := range g.agents {
+		conns = append(conns, c)
+	}
+	g.mu.RUnlock()
+	for _, c := range conns {
+		as := g.reg.AssignmentFor(c.site)
+		if err := c.send(&pb.BackendMessage{Msg: &pb.BackendMessage_Assignment{Assignment: as}}); err != nil {
+			g.log.Warn("assignment re-push failed", "site", c.site, "err", err)
+			continue
+		}
+		c.assignmentVersion = as.Version
+		g.log.Info("re-pushed assignment", "site", c.site, "version", as.Version, "monitors", len(as.Monitors))
 	}
 }
 

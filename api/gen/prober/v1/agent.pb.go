@@ -1167,9 +1167,13 @@ type Monitor struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	Id        string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	IntervalS uint32                 `protobuf:"varint,2,opt,name=interval_s,json=intervalS,proto3" json:"interval_s,omitempty"`
+	// labels are operator-defined dimensions (e.g. supplier, supplier_id) carried
+	// through to the metrics and log records the backend emits for this monitor.
+	Labels map[string]string `protobuf:"bytes,3,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	// Types that are valid to be assigned to Spec:
 	//
 	//	*Monitor_Trace
+	//	*Monitor_SipOptions
 	Spec          isMonitor_Spec `protobuf_oneof:"spec"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1219,6 +1223,13 @@ func (x *Monitor) GetIntervalS() uint32 {
 	return 0
 }
 
+func (x *Monitor) GetLabels() map[string]string {
+	if x != nil {
+		return x.Labels
+	}
+	return nil
+}
+
 func (x *Monitor) GetSpec() isMonitor_Spec {
 	if x != nil {
 		return x.Spec
@@ -1235,15 +1246,32 @@ func (x *Monitor) GetTrace() *TraceSpec {
 	return nil
 }
 
+func (x *Monitor) GetSipOptions() *SipOptionsSpec {
+	if x != nil {
+		if x, ok := x.Spec.(*Monitor_SipOptions); ok {
+			return x.SipOptions
+		}
+	}
+	return nil
+}
+
 type isMonitor_Spec interface {
 	isMonitor_Spec()
 }
 
 type Monitor_Trace struct {
+	// A ping monitor is a TraceSpec with mode = PING; sip_options is its own
+	// spec. Both reuse the interactive engines on the agent.
 	Trace *TraceSpec `protobuf:"bytes,10,opt,name=trace,proto3,oneof"`
 }
 
+type Monitor_SipOptions struct {
+	SipOptions *SipOptionsSpec `protobuf:"bytes,11,opt,name=sip_options,json=sipOptions,proto3,oneof"`
+}
+
 func (*Monitor_Trace) isMonitor_Spec() {}
+
+func (*Monitor_SipOptions) isMonitor_Spec() {}
 
 // Ack tells the agent which event sequence the backend has durably handled,
 // so an agent buffering results while disconnected can discard up to it.
@@ -2453,13 +2481,19 @@ const file_prober_v1_agent_proto_rawDesc = "" +
 	"\n" +
 	"Assignment\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\x04R\aversion\x12.\n" +
-	"\bmonitors\x18\x02 \x03(\v2\x12.prober.v1.MonitorR\bmonitors\"n\n" +
+	"\bmonitors\x18\x02 \x03(\v2\x12.prober.v1.MonitorR\bmonitors\"\x9f\x02\n" +
 	"\aMonitor\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +
-	"interval_s\x18\x02 \x01(\rR\tintervalS\x12,\n" +
+	"interval_s\x18\x02 \x01(\rR\tintervalS\x126\n" +
+	"\x06labels\x18\x03 \x03(\v2\x1e.prober.v1.Monitor.LabelsEntryR\x06labels\x12,\n" +
 	"\x05trace\x18\n" +
-	" \x01(\v2\x14.prober.v1.TraceSpecH\x00R\x05traceB\x06\n" +
+	" \x01(\v2\x14.prober.v1.TraceSpecH\x00R\x05trace\x12<\n" +
+	"\vsip_options\x18\v \x01(\v2\x19.prober.v1.SipOptionsSpecH\x00R\n" +
+	"sipOptions\x1a9\n" +
+	"\vLabelsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B\x06\n" +
 	"\x04spec\"\x17\n" +
 	"\x03Ack\x12\x10\n" +
 	"\x03seq\x18\x01 \x01(\x04R\x03seq\"\x1c\n" +
@@ -2610,7 +2644,7 @@ func file_prober_v1_agent_proto_rawDescGZIP() []byte {
 }
 
 var file_prober_v1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
-var file_prober_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
+var file_prober_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
 var file_prober_v1_agent_proto_goTypes = []any{
 	(Protocol)(0),                 // 0: prober.v1.Protocol
 	(AddressFamily)(0),            // 1: prober.v1.AddressFamily
@@ -2642,7 +2676,8 @@ var file_prober_v1_agent_proto_goTypes = []any{
 	(*HopAddress)(nil),            // 27: prober.v1.HopAddress
 	(*JobFinished)(nil),           // 28: prober.v1.JobFinished
 	(*JobError)(nil),              // 29: prober.v1.JobError
-	(*timestamppb.Timestamp)(nil), // 30: google.protobuf.Timestamp
+	nil,                           // 30: prober.v1.Monitor.LabelsEntry
+	(*timestamppb.Timestamp)(nil), // 31: google.protobuf.Timestamp
 }
 var file_prober_v1_agent_proto_depIdxs = []int32{
 	8,  // 0: prober.v1.AgentMessage.hello:type_name -> prober.v1.Hello
@@ -2657,37 +2692,39 @@ var file_prober_v1_agent_proto_depIdxs = []int32{
 	18, // 9: prober.v1.BackendMessage.ping:type_name -> prober.v1.Ping
 	9,  // 10: prober.v1.Hello.capabilities:type_name -> prober.v1.Capabilities
 	10, // 11: prober.v1.Hello.limits:type_name -> prober.v1.Limits
-	30, // 12: prober.v1.Hello.started_at:type_name -> google.protobuf.Timestamp
-	30, // 13: prober.v1.Heartbeat.time:type_name -> google.protobuf.Timestamp
-	30, // 14: prober.v1.Welcome.time:type_name -> google.protobuf.Timestamp
+	31, // 12: prober.v1.Hello.started_at:type_name -> google.protobuf.Timestamp
+	31, // 13: prober.v1.Heartbeat.time:type_name -> google.protobuf.Timestamp
+	31, // 14: prober.v1.Welcome.time:type_name -> google.protobuf.Timestamp
 	20, // 15: prober.v1.StartJob.trace:type_name -> prober.v1.TraceSpec
 	21, // 16: prober.v1.StartJob.sip_options:type_name -> prober.v1.SipOptionsSpec
 	16, // 17: prober.v1.Assignment.monitors:type_name -> prober.v1.Monitor
-	20, // 18: prober.v1.Monitor.trace:type_name -> prober.v1.TraceSpec
-	0,  // 19: prober.v1.TraceSpec.protocol:type_name -> prober.v1.Protocol
-	1,  // 20: prober.v1.TraceSpec.family:type_name -> prober.v1.AddressFamily
-	2,  // 21: prober.v1.TraceSpec.mode:type_name -> prober.v1.TraceMode
-	3,  // 22: prober.v1.SipOptionsSpec.transport:type_name -> prober.v1.SipTransport
-	1,  // 23: prober.v1.SipOptionsSpec.family:type_name -> prober.v1.AddressFamily
-	30, // 24: prober.v1.JobEvent.time:type_name -> google.protobuf.Timestamp
-	24, // 25: prober.v1.JobEvent.started:type_name -> prober.v1.JobStarted
-	25, // 26: prober.v1.JobEvent.cycle:type_name -> prober.v1.Cycle
-	28, // 27: prober.v1.JobEvent.finished:type_name -> prober.v1.JobFinished
-	29, // 28: prober.v1.JobEvent.error:type_name -> prober.v1.JobError
-	22, // 29: prober.v1.JobEvent.sip_result:type_name -> prober.v1.SipResult
-	0,  // 30: prober.v1.JobStarted.protocol:type_name -> prober.v1.Protocol
-	1,  // 31: prober.v1.JobStarted.family:type_name -> prober.v1.AddressFamily
-	26, // 32: prober.v1.Cycle.hops:type_name -> prober.v1.Hop
-	27, // 33: prober.v1.Hop.addresses:type_name -> prober.v1.HopAddress
-	4,  // 34: prober.v1.JobFinished.reason:type_name -> prober.v1.JobFinished.Reason
-	5,  // 35: prober.v1.JobError.code:type_name -> prober.v1.JobError.Code
-	6,  // 36: prober.v1.AgentGateway.Session:input_type -> prober.v1.AgentMessage
-	7,  // 37: prober.v1.AgentGateway.Session:output_type -> prober.v1.BackendMessage
-	37, // [37:38] is the sub-list for method output_type
-	36, // [36:37] is the sub-list for method input_type
-	36, // [36:36] is the sub-list for extension type_name
-	36, // [36:36] is the sub-list for extension extendee
-	0,  // [0:36] is the sub-list for field type_name
+	30, // 18: prober.v1.Monitor.labels:type_name -> prober.v1.Monitor.LabelsEntry
+	20, // 19: prober.v1.Monitor.trace:type_name -> prober.v1.TraceSpec
+	21, // 20: prober.v1.Monitor.sip_options:type_name -> prober.v1.SipOptionsSpec
+	0,  // 21: prober.v1.TraceSpec.protocol:type_name -> prober.v1.Protocol
+	1,  // 22: prober.v1.TraceSpec.family:type_name -> prober.v1.AddressFamily
+	2,  // 23: prober.v1.TraceSpec.mode:type_name -> prober.v1.TraceMode
+	3,  // 24: prober.v1.SipOptionsSpec.transport:type_name -> prober.v1.SipTransport
+	1,  // 25: prober.v1.SipOptionsSpec.family:type_name -> prober.v1.AddressFamily
+	31, // 26: prober.v1.JobEvent.time:type_name -> google.protobuf.Timestamp
+	24, // 27: prober.v1.JobEvent.started:type_name -> prober.v1.JobStarted
+	25, // 28: prober.v1.JobEvent.cycle:type_name -> prober.v1.Cycle
+	28, // 29: prober.v1.JobEvent.finished:type_name -> prober.v1.JobFinished
+	29, // 30: prober.v1.JobEvent.error:type_name -> prober.v1.JobError
+	22, // 31: prober.v1.JobEvent.sip_result:type_name -> prober.v1.SipResult
+	0,  // 32: prober.v1.JobStarted.protocol:type_name -> prober.v1.Protocol
+	1,  // 33: prober.v1.JobStarted.family:type_name -> prober.v1.AddressFamily
+	26, // 34: prober.v1.Cycle.hops:type_name -> prober.v1.Hop
+	27, // 35: prober.v1.Hop.addresses:type_name -> prober.v1.HopAddress
+	4,  // 36: prober.v1.JobFinished.reason:type_name -> prober.v1.JobFinished.Reason
+	5,  // 37: prober.v1.JobError.code:type_name -> prober.v1.JobError.Code
+	6,  // 38: prober.v1.AgentGateway.Session:input_type -> prober.v1.AgentMessage
+	7,  // 39: prober.v1.AgentGateway.Session:output_type -> prober.v1.BackendMessage
+	39, // [39:40] is the sub-list for method output_type
+	38, // [38:39] is the sub-list for method input_type
+	38, // [38:38] is the sub-list for extension type_name
+	38, // [38:38] is the sub-list for extension extendee
+	0,  // [0:38] is the sub-list for field type_name
 }
 
 func init() { file_prober_v1_agent_proto_init() }
@@ -2715,6 +2752,7 @@ func file_prober_v1_agent_proto_init() {
 	}
 	file_prober_v1_agent_proto_msgTypes[10].OneofWrappers = []any{
 		(*Monitor_Trace)(nil),
+		(*Monitor_SipOptions)(nil),
 	}
 	file_prober_v1_agent_proto_msgTypes[16].OneofWrappers = []any{}
 	file_prober_v1_agent_proto_msgTypes[17].OneofWrappers = []any{
@@ -2731,7 +2769,7 @@ func file_prober_v1_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_prober_v1_agent_proto_rawDesc), len(file_prober_v1_agent_proto_rawDesc)),
 			NumEnums:      6,
-			NumMessages:   24,
+			NumMessages:   25,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

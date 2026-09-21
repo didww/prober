@@ -7,7 +7,7 @@ on:
     types: [published]
 
 permissions:
-  contents: write # attach artifacts to the release
+  contents: read # checkout only; artifacts ship to the APT repo, GHCR and OCI
   packages: write # push images and charts to ghcr.io
 
 jobs:
@@ -89,11 +89,6 @@ jobs:
             dpkg-deb --build --root-owner-group "$dir"
           done
           ls -l *.deb
-
-      - name: Attach to release
-        uses: softprops/action-gh-release@v3
-        with:
-          files: "*.deb"
 
       - name: Upload to the APT repository
         uses: yeti-switch/upload-debian-pkg-action@v2

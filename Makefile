@@ -43,12 +43,13 @@ proto:
 test:
 	go test ./...
 
-## test-trace: the engine's integration tests, which need raw sockets.
+## test-trace: the raw-socket integration tests (trace engine + the backend
+## monitoring end-to-end test), which need raw sockets.
 ## Runs them as root inside an unprivileged user+network namespace, so no
 ## sudo and no capability on the binary is required. This is what CI runs.
 .PHONY: test-trace
 test-trace:
-	unshare -Urn sh -c 'ip link set lo up && go test -count=1 ./internal/trace/...'
+	unshare -Urn sh -c 'ip link set lo up && go test -count=1 ./internal/trace/... ./internal/backend/...'
 
 .PHONY: check
 check:

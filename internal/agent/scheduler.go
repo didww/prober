@@ -22,7 +22,6 @@ func monitorJobID(id string) string { return monitorJobPrefix + id }
 // assignment always applies; reconnect needs no reconciliation.
 type scheduler struct {
 	a    *Agent
-	ctx  context.Context
 	send func(*pb.AgentMessage) error
 
 	mu      sync.Mutex
@@ -30,13 +29,15 @@ type scheduler struct {
 	cancels []context.CancelFunc
 }
 
-func newScheduler(ctx context.Context, a *Agent, send func(*pb.AgentMessage) error) *scheduler {
-	return &scheduler{a: a, ctx: ctx, send: send}
+func newScheduler(a *Agent, send func(*pb.AgentMessage) error) *scheduler {
+	return &scheduler{a: a, send: send}
 }
 
 // apply replaces the schedule with the monitors in as, unless the version is
-// unchanged. Stopping the old tickers cancels their in-flight probes.
-func (s *scheduler) apply(as *pb.Assignment) {
+// unchanged. Stopping the old tickers cancels their in-flight probes. ctx bounds
+// every monitor started here (the session context); a new session builds a fresh
+// scheduler, so ctx is stable across the apply calls of one session.
+func (s *scheduler) apply(ctx context.Context, as *pb.Assignment) {
 	if as == nil {
 		return
 	}
@@ -50,9 +51,9 @@ func (s *scheduler) apply(as *pb.Assignment) {
 	n := len(as.Monitors)
 	s.a.log.Info("applying monitor assignment", "version", as.Version, "monitors", n)
 	for i, m := range as.Monitors {
-		ctx, cancel := context.WithCancel(s.ctx)
+		mctx, cancel := context.WithCancel(ctx)
 		s.cancels = append(s.cancels, cancel)
-		go s.runMonitor(ctx, i, n, m)
+		go s.runMonitor(mctx, i, n, m)
 	}
 }
 

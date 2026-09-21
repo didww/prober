@@ -111,17 +111,20 @@ func (c *Client) Run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			// Drain without blocking on new arrivals, then final flush.
+			// ctx is cancelled, so posting with it would fail at once. Detach
+			// cancellation (keeping any values) so the final drain can still
+			// flush what is buffered before returning.
+			flushCtx := context.WithoutCancel(ctx)
 			for {
 				select {
 				case rec := <-c.ch:
 					batch = append(batch, rec)
 					if len(batch) >= c.opt.BatchMax {
-						c.post(context.Background(), batch)
+						c.post(flushCtx, batch)
 						batch = batch[:0]
 					}
 				default:
-					c.post(context.Background(), batch)
+					c.post(flushCtx, batch)
 					if d := c.dropped.load(); d > 0 {
 						c.log.Warn("victorialogs: dropped records (queue full)", "count", d)
 					}

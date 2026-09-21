@@ -103,7 +103,10 @@ func NewMonitorSink(reg *MonitorRegistry, vl *vlog.Client, promReg prometheus.Re
 // Describe sends no descriptors, marking this an "unchecked" collector: the
 // info metric's label names vary per monitor (each carries its own operator
 // labels), which a fixed descriptor cannot express.
-func (s *MonitorSink) Describe(chan<- *prometheus.Desc) {}
+func (s *MonitorSink) Describe(chan<- *prometheus.Desc) {
+	// Intentionally empty: an unchecked collector announces no descriptors, which
+	// is what lets Collect emit info metrics whose label names vary per monitor.
+}
 
 // Collect emits one prober_monitor_info series per known (site, monitor) with
 // its operator labels, so those labels are queryable alongside the fixed-label
@@ -154,7 +157,8 @@ func (s *MonitorSink) Retain() {
 	}
 }
 
-// OnMonitorEvent handles one event for a "mon:<id>" job from a given site.
+// OnMonitorEvent handles one event for a "mon:<id>" job from a given site. It
+// dispatches to a per-kind handler; the handlers own the metric and log updates.
 func (s *MonitorSink) OnMonitorEvent(site string, ev *pb.JobEvent) {
 	id := monitorIDOf(ev.JobId)
 	st := s.stateFor(site, id)
@@ -165,60 +169,76 @@ func (s *MonitorSink) OnMonitorEvent(site string, ev *pb.JobEvent) {
 
 	switch e := ev.Event.(type) {
 	case *pb.JobEvent_Started:
-		s.mu.Lock()
-		st.resolved = e.Started.Resolved
-		st.source = e.Started.Source
-		if e.Started.Protocol != pb.Protocol_PROTOCOL_UNSPECIFIED {
-			st.protocol = protoName(e.Started.Protocol)
-		}
-		s.mu.Unlock()
-
+		s.onStarted(st, e.Started)
 	case *pb.JobEvent_Cycle:
-		hop, matched := targetHop(e.Cycle, st.resolvedLocked(s))
-		reached := matched && hop != nil && hop.Received > 0
-		s.probesTotal.WithLabelValues(lv...).Inc()
-		if reached {
-			s.successTotal.WithLabelValues(lv...).Inc()
-			s.rttSeconds.WithLabelValues(lv...).Observe(float64(hop.AvgUs) / 1e6)
-			s.up.WithLabelValues(lv...).Set(1)
-		} else {
-			s.up.WithLabelValues(lv...).Set(0)
-		}
-		loss := 1.0
-		if matched && hop != nil {
-			loss = hop.LossPct / 100
-		}
-		s.lossRatio.WithLabelValues(lv...).Set(loss)
-		if st.kind == "trace" {
-			s.shipCycle(site, id, st, e.Cycle)
-		}
-
+		s.onCycle(site, id, st, lv, e.Cycle)
 	case *pb.JobEvent_SipResult:
-		r := e.SipResult
-		s.probesTotal.WithLabelValues(lv...).Inc()
-		code := "timeout"
-		success := false
-		if r.Responded {
-			code = strconv.Itoa(int(r.StatusCode))
-			success = r.StatusCode/100 == 2
-		}
-		codeLV := append(append([]string{}, lv...), code)
-		s.sipResponses.WithLabelValues(codeLV...).Inc()
-		if success {
-			s.successTotal.WithLabelValues(lv...).Inc()
-			s.up.WithLabelValues(lv...).Set(1)
-		} else {
-			s.up.WithLabelValues(lv...).Set(0)
-		}
-		if r.Responded && r.RttUs != nil {
-			s.rttSeconds.WithLabelValues(lv...).Observe(float64(*r.RttUs) / 1e6)
-		}
-
+		s.onSipResult(lv, e.SipResult)
 	case *pb.JobEvent_Error:
 		// A failed probe (resolve/policy/engine): count it and mark down.
 		s.probesTotal.WithLabelValues(lv...).Inc()
 		s.up.WithLabelValues(lv...).Set(0)
 	}
+}
+
+// onStarted records the resolved address, source, and protocol for later events.
+func (s *MonitorSink) onStarted(st *monState, started *pb.JobStarted) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st.resolved = started.Resolved
+	st.source = started.Source
+	if started.Protocol != pb.Protocol_PROTOCOL_UNSPECIFIED {
+		st.protocol = protoName(started.Protocol)
+	}
+}
+
+// onCycle updates RTT, loss, and up from a trace/ping cycle, and ships hop
+// detail to VictoriaLogs for trace monitors.
+func (s *MonitorSink) onCycle(site, id string, st *monState, lv []string, c *pb.Cycle) {
+	hop, matched := targetHop(c, st.resolvedLocked(s))
+	reached := matched && hop != nil && hop.Received > 0
+	s.probesTotal.WithLabelValues(lv...).Inc()
+	if reached {
+		s.successTotal.WithLabelValues(lv...).Inc()
+		s.rttSeconds.WithLabelValues(lv...).Observe(float64(hop.AvgUs) / 1e6)
+	}
+	s.up.WithLabelValues(lv...).Set(boolGauge(reached))
+	loss := 1.0
+	if matched && hop != nil {
+		loss = hop.LossPct / 100
+	}
+	s.lossRatio.WithLabelValues(lv...).Set(loss)
+	if st.kind == "trace" {
+		s.shipCycle(site, id, st, c)
+	}
+}
+
+// onSipResult updates the SIP counters, code label, up, and RTT for one probe.
+func (s *MonitorSink) onSipResult(lv []string, r *pb.SipResult) {
+	s.probesTotal.WithLabelValues(lv...).Inc()
+	code := "timeout"
+	success := false
+	if r.Responded {
+		code = strconv.Itoa(int(r.StatusCode))
+		success = r.StatusCode/100 == 2
+	}
+	codeLV := append(append([]string{}, lv...), code)
+	s.sipResponses.WithLabelValues(codeLV...).Inc()
+	if success {
+		s.successTotal.WithLabelValues(lv...).Inc()
+	}
+	s.up.WithLabelValues(lv...).Set(boolGauge(success))
+	if r.Responded && r.RttUs != nil {
+		s.rttSeconds.WithLabelValues(lv...).Observe(float64(*r.RttUs) / 1e6)
+	}
+}
+
+// boolGauge maps a health boolean to a gauge value.
+func boolGauge(ok bool) float64 {
+	if ok {
+		return 1
+	}
+	return 0
 }
 
 // stateFor returns the state for (site, monitor), creating it from the registry

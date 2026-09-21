@@ -257,7 +257,7 @@ func (a *Agent) session(ctx context.Context) error {
 	// The self-scheduled monitor runner for this session. The backend pushes a
 	// versioned Assignment (on connect and on reload); the scheduler owns the
 	// timers. It stops when sessCtx is cancelled on return.
-	sched := newScheduler(sessCtx, a, send)
+	sched := newScheduler(a, send)
 
 	for {
 		msg, err := stream.Recv()
@@ -270,7 +270,7 @@ func (a *Agent) session(ctx context.Context) error {
 		case *pb.BackendMessage_Cancel:
 			a.jobs.cancel(m.Cancel.JobId)
 		case *pb.BackendMessage_Assignment:
-			sched.apply(m.Assignment)
+			sched.apply(sessCtx, m.Assignment)
 		case *pb.BackendMessage_Ping:
 			// Echo at once so the backend can measure the round trip.
 			_ = send(&pb.AgentMessage{Msg: &pb.AgentMessage_Pong{Pong: &pb.Pong{Nonce: m.Ping.Nonce}}})

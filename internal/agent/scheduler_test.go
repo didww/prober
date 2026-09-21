@@ -33,8 +33,8 @@ func TestSchedulerFiresEachMonitor(t *testing.T) {
 	events := make(chan *pb.AgentMessage, 64)
 	send := func(m *pb.AgentMessage) error { events <- m; return nil }
 
-	sched := newScheduler(ctx, a, send)
-	sched.apply(&pb.Assignment{Version: 1, Monitors: []*pb.Monitor{
+	sched := newScheduler(a, send)
+	sched.apply(ctx, &pb.Assignment{Version: 1, Monitors: []*pb.Monitor{
 		{Id: "m1", IntervalS: 1, Spec: &pb.Monitor_Trace{Trace: &pb.TraceSpec{Target: "1.1.1.1"}}},
 		{Id: "m2", IntervalS: 1, Spec: &pb.Monitor_SipOptions{SipOptions: &pb.SipOptionsSpec{Target: "2.2.2.2"}}},
 	}})
@@ -60,17 +60,17 @@ func TestSchedulerNoopOnSameVersion(t *testing.T) {
 	a := minimalAgent()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	sched := newScheduler(ctx, a, func(*pb.AgentMessage) error { return nil })
+	sched := newScheduler(a, func(*pb.AgentMessage) error { return nil })
 
 	as := &pb.Assignment{Version: 5, Monitors: []*pb.Monitor{
 		{Id: "m1", IntervalS: 60, Spec: &pb.Monitor_Trace{Trace: &pb.TraceSpec{Target: "1.1.1.1"}}},
 	}}
-	sched.apply(as)
+	sched.apply(ctx, as)
 	sched.mu.Lock()
 	n1 := len(sched.cancels)
 	sched.mu.Unlock()
 
-	sched.apply(as) // same version: must not restart
+	sched.apply(ctx, as) // same version: must not restart
 	sched.mu.Lock()
 	n2 := len(sched.cancels)
 	v := sched.version
@@ -88,12 +88,12 @@ func TestSchedulerReplacesOnNewVersion(t *testing.T) {
 	a := minimalAgent()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	sched := newScheduler(ctx, a, func(*pb.AgentMessage) error { return nil })
+	sched := newScheduler(a, func(*pb.AgentMessage) error { return nil })
 
-	sched.apply(&pb.Assignment{Version: 1, Monitors: []*pb.Monitor{
+	sched.apply(ctx, &pb.Assignment{Version: 1, Monitors: []*pb.Monitor{
 		{Id: "m1", IntervalS: 60, Spec: &pb.Monitor_Trace{Trace: &pb.TraceSpec{Target: "1.1.1.1"}}},
 	}})
-	sched.apply(&pb.Assignment{Version: 2, Monitors: []*pb.Monitor{
+	sched.apply(ctx, &pb.Assignment{Version: 2, Monitors: []*pb.Monitor{
 		{Id: "m1", IntervalS: 60, Spec: &pb.Monitor_Trace{Trace: &pb.TraceSpec{Target: "1.1.1.1"}}},
 		{Id: "m2", IntervalS: 60, Spec: &pb.Monitor_Trace{Trace: &pb.TraceSpec{Target: "2.2.2.2"}}},
 	}})

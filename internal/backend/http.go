@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"slices"
 	"strconv"
 	"strings"
@@ -15,6 +16,7 @@ import (
 
 	pb "github.com/didww/prober/api/gen/prober/v1"
 	"github.com/didww/prober/internal/auth"
+	"github.com/didww/prober/internal/vlog"
 )
 
 // API is the browser-facing HTTP surface: the prober list, starting and
@@ -27,10 +29,22 @@ type API struct {
 	log     *slog.Logger
 	version string
 	commit  string
+
+	// Monitoring, for the monitors page. Set via SetMonitoring; nil means
+	// the page lists nothing.
+	reg  *MonitorRegistry
+	sink *MonitorSink
+	vl   *vlog.Client
 }
 
 func NewAPI(gw *Gateway, mgr *Manager, a *auth.Auth, log *slog.Logger, version, commit string) *API {
 	return &API{gw: gw, mgr: mgr, auth: a, log: log, version: version, commit: commit}
+}
+
+// SetMonitoring wires the monitor registry, the sink holding each site's latest
+// outcome, and the VictoriaLogs client the trace history is read from.
+func (a *API) SetMonitoring(reg *MonitorRegistry, sink *MonitorSink, vl *vlog.Client) {
+	a.reg, a.sink, a.vl = reg, sink, vl
 }
 
 func (a *API) Routes() http.Handler {
@@ -57,8 +71,11 @@ func (a *API) Routes() http.Handler {
 		}
 		r.Get("/probers", a.probers)
 		r.Get("/agents", a.agents)
+		r.Get("/monitors", a.listMonitors)
+		r.Get("/monitors/{id}/reports", a.monitorReports)
 		r.Post("/runs", a.startRun)
 		r.Post("/sip-runs", a.startSipRun)
+		r.Post("/dns-runs", a.startDnsRun)
 		r.Get("/runs/{id}/events", a.runEvents)
 		r.Delete("/runs/{id}", a.cancelRun)
 	})
@@ -175,14 +192,8 @@ func (a *API) startRun(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "target is required")
 		return
 	}
-	sites := req.Sites
-	if len(sites) == 0 {
-		for _, h := range a.gw.Sites() {
-			sites = append(sites, h.Site)
-		}
-	}
-	if len(sites) == 0 {
-		writeErr(w, http.StatusServiceUnavailable, "no agents connected")
+	sites, ok := a.runSites(w, req.Sites)
+	if !ok {
 		return
 	}
 
@@ -222,14 +233,8 @@ func (a *API) startSipRun(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "target is required")
 		return
 	}
-	sites := req.Sites
-	if len(sites) == 0 {
-		for _, h := range a.gw.Sites() {
-			sites = append(sites, h.Site)
-		}
-	}
-	if len(sites) == 0 {
-		writeErr(w, http.StatusServiceUnavailable, "no agents connected")
+	sites, ok := a.runSites(w, req.Sites)
+	if !ok {
 		return
 	}
 	spec := &pb.SipOptionsSpec{
@@ -245,6 +250,55 @@ func (a *API) startSipRun(w http.ResponseWriter, r *http.Request) {
 		return &pb.StartJob{JobId: jobID, Spec: &pb.StartJob_SipOptions{SipOptions: spec}}
 	}, sites)
 	writeJSON(w, http.StatusCreated, map[string]any{"id": run.ID, "sites": sites})
+}
+
+type dnsStartRequest struct {
+	Name      string   `json:"name"`
+	Sites     []string `json:"sites"`
+	TimeoutMS uint32   `json:"timeout_ms"`
+}
+
+func (a *API) startDnsRun(w http.ResponseWriter, r *http.Request) {
+	var req dnsStartRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	req.Name = strings.TrimSpace(req.Name)
+	if req.Name == "" {
+		writeErr(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	if _, err := netip.ParseAddr(strings.Trim(req.Name, "[]")); err == nil {
+		writeErr(w, http.StatusBadRequest, "enter a host name, not an address")
+		return
+	}
+	sites, ok := a.runSites(w, req.Sites)
+	if !ok {
+		return
+	}
+	spec := &pb.DnsSpec{Name: req.Name, TimeoutMs: req.TimeoutMS}
+	run := a.mgr.Start(func(jobID string) *pb.StartJob {
+		return &pb.StartJob{JobId: jobID, Spec: &pb.StartJob_Dns{Dns: spec}}
+	}, sites)
+	writeJSON(w, http.StatusCreated, map[string]any{"id": run.ID, "sites": sites})
+}
+
+// runSites is the sites a run fans out to: those requested, or every connected
+// site when none were. When there is nothing to run on it writes the error
+// response and reports false.
+func (a *API) runSites(w http.ResponseWriter, requested []string) ([]string, bool) {
+	sites := requested
+	if len(sites) == 0 {
+		for _, h := range a.gw.Sites() {
+			sites = append(sites, h.Site)
+		}
+	}
+	if len(sites) == 0 {
+		writeErr(w, http.StatusServiceUnavailable, "no agents connected")
+		return nil, false
+	}
+	return sites, true
 }
 
 func (a *API) cancelRun(w http.ResponseWriter, r *http.Request) {

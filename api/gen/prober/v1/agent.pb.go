@@ -289,7 +289,7 @@ func (x JobFinished_Reason) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use JobFinished_Reason.Descriptor instead.
 func (JobFinished_Reason) EnumDescriptor() ([]byte, []int) {
-	return file_prober_v1_agent_proto_rawDescGZIP(), []int{22, 0}
+	return file_prober_v1_agent_proto_rawDescGZIP(), []int{25, 0}
 }
 
 type JobError_Code int32
@@ -344,7 +344,7 @@ func (x JobError_Code) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use JobError_Code.Descriptor instead.
 func (JobError_Code) EnumDescriptor() ([]byte, []int) {
-	return file_prober_v1_agent_proto_rawDescGZIP(), []int{23, 0}
+	return file_prober_v1_agent_proto_rawDescGZIP(), []int{26, 0}
 }
 
 type AgentMessage struct {
@@ -981,6 +981,7 @@ type StartJob struct {
 	//
 	//	*StartJob_Trace
 	//	*StartJob_SipOptions
+	//	*StartJob_Dns
 	Spec          isStartJob_Spec `protobuf_oneof:"spec"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1048,6 +1049,15 @@ func (x *StartJob) GetSipOptions() *SipOptionsSpec {
 	return nil
 }
 
+func (x *StartJob) GetDns() *DnsSpec {
+	if x != nil {
+		if x, ok := x.Spec.(*StartJob_Dns); ok {
+			return x.Dns
+		}
+	}
+	return nil
+}
+
 type isStartJob_Spec interface {
 	isStartJob_Spec()
 }
@@ -1060,9 +1070,15 @@ type StartJob_SipOptions struct {
 	SipOptions *SipOptionsSpec `protobuf:"bytes,11,opt,name=sip_options,json=sipOptions,proto3,oneof"`
 }
 
+type StartJob_Dns struct {
+	Dns *DnsSpec `protobuf:"bytes,12,opt,name=dns,proto3,oneof"`
+}
+
 func (*StartJob_Trace) isStartJob_Spec() {}
 
 func (*StartJob_SipOptions) isStartJob_Spec() {}
+
+func (*StartJob_Dns) isStartJob_Spec() {}
 
 type CancelJob struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1805,6 +1821,217 @@ func (x *SipResult) GetTlsError() string {
 	return ""
 }
 
+// DnsSpec asks the agent to resolve a name with its host's own resolver: the
+// A and AAAA records, and the SIP service SRV records (_sip._udp, _sip._tcp,
+// _sip._tls and _sips._tcp). The point is to see what each site's resolver
+// answers, which differs under GeoDNS and split-horizon setups and is what
+// the trace and SIP probes at that site would use.
+type DnsSpec struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Name  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// How long each query may take before it is reported as an error; 0 means
+	// the agent default.
+	TimeoutMs     uint32 `protobuf:"varint,2,opt,name=timeout_ms,json=timeoutMs,proto3" json:"timeout_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DnsSpec) Reset() {
+	*x = DnsSpec{}
+	mi := &file_prober_v1_agent_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DnsSpec) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DnsSpec) ProtoMessage() {}
+
+func (x *DnsSpec) ProtoReflect() protoreflect.Message {
+	mi := &file_prober_v1_agent_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DnsSpec.ProtoReflect.Descriptor instead.
+func (*DnsSpec) Descriptor() ([]byte, []int) {
+	return file_prober_v1_agent_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *DnsSpec) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *DnsSpec) GetTimeoutMs() uint32 {
+	if x != nil {
+		return x.TimeoutMs
+	}
+	return 0
+}
+
+// DnsResult is one query's answer. One is sent per record type queried, as it
+// completes.
+type DnsResult struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The record type queried: A, AAAA or SRV.
+	Type string `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`
+	// The owner name queried, e.g. "_sip._udp.example.com".
+	Name    string       `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Records []*DnsRecord `protobuf:"bytes,3,rep,name=records,proto3" json:"records,omitempty"`
+	// Empty when the query was answered, even with no records (NXDOMAIN and
+	// NODATA are answers); otherwise why it failed (timeout, SERVFAIL, ...).
+	Error         string `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`
+	RttUs         uint32 `protobuf:"varint,5,opt,name=rtt_us,json=rttUs,proto3" json:"rtt_us,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DnsResult) Reset() {
+	*x = DnsResult{}
+	mi := &file_prober_v1_agent_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DnsResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DnsResult) ProtoMessage() {}
+
+func (x *DnsResult) ProtoReflect() protoreflect.Message {
+	mi := &file_prober_v1_agent_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DnsResult.ProtoReflect.Descriptor instead.
+func (*DnsResult) Descriptor() ([]byte, []int) {
+	return file_prober_v1_agent_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *DnsResult) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *DnsResult) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *DnsResult) GetRecords() []*DnsRecord {
+	if x != nil {
+		return x.Records
+	}
+	return nil
+}
+
+func (x *DnsResult) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+func (x *DnsResult) GetRttUs() uint32 {
+	if x != nil {
+		return x.RttUs
+	}
+	return 0
+}
+
+type DnsRecord struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The address for A and AAAA; the target host for SRV.
+	Value string `protobuf:"bytes,1,opt,name=value,proto3" json:"value,omitempty"`
+	// SRV only.
+	Priority      uint32 `protobuf:"varint,2,opt,name=priority,proto3" json:"priority,omitempty"`
+	Weight        uint32 `protobuf:"varint,3,opt,name=weight,proto3" json:"weight,omitempty"`
+	Port          uint32 `protobuf:"varint,4,opt,name=port,proto3" json:"port,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DnsRecord) Reset() {
+	*x = DnsRecord{}
+	mi := &file_prober_v1_agent_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DnsRecord) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DnsRecord) ProtoMessage() {}
+
+func (x *DnsRecord) ProtoReflect() protoreflect.Message {
+	mi := &file_prober_v1_agent_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DnsRecord.ProtoReflect.Descriptor instead.
+func (*DnsRecord) Descriptor() ([]byte, []int) {
+	return file_prober_v1_agent_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *DnsRecord) GetValue() string {
+	if x != nil {
+		return x.Value
+	}
+	return ""
+}
+
+func (x *DnsRecord) GetPriority() uint32 {
+	if x != nil {
+		return x.Priority
+	}
+	return 0
+}
+
+func (x *DnsRecord) GetWeight() uint32 {
+	if x != nil {
+		return x.Weight
+	}
+	return 0
+}
+
+func (x *DnsRecord) GetPort() uint32 {
+	if x != nil {
+		return x.Port
+	}
+	return 0
+}
+
 // JobEvent is anything an agent reports about a job. Every event carries the
 // agent's clock and a per-agent monotonic sequence, so the backend can store
 // or deduplicate events without state about the job.
@@ -1820,6 +2047,7 @@ type JobEvent struct {
 	//	*JobEvent_Finished
 	//	*JobEvent_Error
 	//	*JobEvent_SipResult
+	//	*JobEvent_DnsResult
 	Event         isJobEvent_Event `protobuf_oneof:"event"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1827,7 +2055,7 @@ type JobEvent struct {
 
 func (x *JobEvent) Reset() {
 	*x = JobEvent{}
-	mi := &file_prober_v1_agent_proto_msgTypes[17]
+	mi := &file_prober_v1_agent_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1839,7 +2067,7 @@ func (x *JobEvent) String() string {
 func (*JobEvent) ProtoMessage() {}
 
 func (x *JobEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_prober_v1_agent_proto_msgTypes[17]
+	mi := &file_prober_v1_agent_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1852,7 +2080,7 @@ func (x *JobEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobEvent.ProtoReflect.Descriptor instead.
 func (*JobEvent) Descriptor() ([]byte, []int) {
-	return file_prober_v1_agent_proto_rawDescGZIP(), []int{17}
+	return file_prober_v1_agent_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *JobEvent) GetJobId() string {
@@ -1928,6 +2156,15 @@ func (x *JobEvent) GetSipResult() *SipResult {
 	return nil
 }
 
+func (x *JobEvent) GetDnsResult() *DnsResult {
+	if x != nil {
+		if x, ok := x.Event.(*JobEvent_DnsResult); ok {
+			return x.DnsResult
+		}
+	}
+	return nil
+}
+
 type isJobEvent_Event interface {
 	isJobEvent_Event()
 }
@@ -1952,6 +2189,10 @@ type JobEvent_SipResult struct {
 	SipResult *SipResult `protobuf:"bytes,14,opt,name=sip_result,json=sipResult,proto3,oneof"`
 }
 
+type JobEvent_DnsResult struct {
+	DnsResult *DnsResult `protobuf:"bytes,15,opt,name=dns_result,json=dnsResult,proto3,oneof"`
+}
+
 func (*JobEvent_Started) isJobEvent_Event() {}
 
 func (*JobEvent_Cycle) isJobEvent_Event() {}
@@ -1961,6 +2202,8 @@ func (*JobEvent_Finished) isJobEvent_Event() {}
 func (*JobEvent_Error) isJobEvent_Event() {}
 
 func (*JobEvent_SipResult) isJobEvent_Event() {}
+
+func (*JobEvent_DnsResult) isJobEvent_Event() {}
 
 // JobStarted is sent once the target resolved and probing began.
 type JobStarted struct {
@@ -1973,14 +2216,17 @@ type JobStarted struct {
 	Protocol Protocol      `protobuf:"varint,4,opt,name=protocol,proto3,enum=prober.v1.Protocol" json:"protocol,omitempty"`
 	Family   AddressFamily `protobuf:"varint,5,opt,name=family,proto3,enum=prober.v1.AddressFamily" json:"family,omitempty"`
 	// For SIP: the transport used (udp/tcp/tls/wss). Empty for trace.
-	Transport     string `protobuf:"bytes,6,opt,name=transport,proto3" json:"transport,omitempty"`
+	Transport string `protobuf:"bytes,6,opt,name=transport,proto3" json:"transport,omitempty"`
+	// For DNS: the resolver addresses from the agent host's resolv.conf, so the
+	// answers can be read against who gave them. Empty otherwise.
+	Nameservers   []string `protobuf:"bytes,7,rep,name=nameservers,proto3" json:"nameservers,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *JobStarted) Reset() {
 	*x = JobStarted{}
-	mi := &file_prober_v1_agent_proto_msgTypes[18]
+	mi := &file_prober_v1_agent_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1992,7 +2238,7 @@ func (x *JobStarted) String() string {
 func (*JobStarted) ProtoMessage() {}
 
 func (x *JobStarted) ProtoReflect() protoreflect.Message {
-	mi := &file_prober_v1_agent_proto_msgTypes[18]
+	mi := &file_prober_v1_agent_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2005,7 +2251,7 @@ func (x *JobStarted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobStarted.ProtoReflect.Descriptor instead.
 func (*JobStarted) Descriptor() ([]byte, []int) {
-	return file_prober_v1_agent_proto_rawDescGZIP(), []int{18}
+	return file_prober_v1_agent_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *JobStarted) GetTarget() string {
@@ -2050,6 +2296,13 @@ func (x *JobStarted) GetTransport() string {
 	return ""
 }
 
+func (x *JobStarted) GetNameservers() []string {
+	if x != nil {
+		return x.Nameservers
+	}
+	return nil
+}
+
 // Cycle is emitted once per cycle with every hop's sample and its running
 // aggregates. One event per site per cycle keeps the stream small.
 type Cycle struct {
@@ -2064,7 +2317,7 @@ type Cycle struct {
 
 func (x *Cycle) Reset() {
 	*x = Cycle{}
-	mi := &file_prober_v1_agent_proto_msgTypes[19]
+	mi := &file_prober_v1_agent_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2076,7 +2329,7 @@ func (x *Cycle) String() string {
 func (*Cycle) ProtoMessage() {}
 
 func (x *Cycle) ProtoReflect() protoreflect.Message {
-	mi := &file_prober_v1_agent_proto_msgTypes[19]
+	mi := &file_prober_v1_agent_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2089,7 +2342,7 @@ func (x *Cycle) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Cycle.ProtoReflect.Descriptor instead.
 func (*Cycle) Descriptor() ([]byte, []int) {
-	return file_prober_v1_agent_proto_rawDescGZIP(), []int{19}
+	return file_prober_v1_agent_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *Cycle) GetNumber() uint32 {
@@ -2138,7 +2391,7 @@ type Hop struct {
 
 func (x *Hop) Reset() {
 	*x = Hop{}
-	mi := &file_prober_v1_agent_proto_msgTypes[20]
+	mi := &file_prober_v1_agent_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2150,7 +2403,7 @@ func (x *Hop) String() string {
 func (*Hop) ProtoMessage() {}
 
 func (x *Hop) ProtoReflect() protoreflect.Message {
-	mi := &file_prober_v1_agent_proto_msgTypes[20]
+	mi := &file_prober_v1_agent_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2163,7 +2416,7 @@ func (x *Hop) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Hop.ProtoReflect.Descriptor instead.
 func (*Hop) Descriptor() ([]byte, []int) {
-	return file_prober_v1_agent_proto_rawDescGZIP(), []int{20}
+	return file_prober_v1_agent_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *Hop) GetTtl() uint32 {
@@ -2263,7 +2516,7 @@ type HopAddress struct {
 
 func (x *HopAddress) Reset() {
 	*x = HopAddress{}
-	mi := &file_prober_v1_agent_proto_msgTypes[21]
+	mi := &file_prober_v1_agent_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2275,7 +2528,7 @@ func (x *HopAddress) String() string {
 func (*HopAddress) ProtoMessage() {}
 
 func (x *HopAddress) ProtoReflect() protoreflect.Message {
-	mi := &file_prober_v1_agent_proto_msgTypes[21]
+	mi := &file_prober_v1_agent_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2288,7 +2541,7 @@ func (x *HopAddress) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HopAddress.ProtoReflect.Descriptor instead.
 func (*HopAddress) Descriptor() ([]byte, []int) {
-	return file_prober_v1_agent_proto_rawDescGZIP(), []int{21}
+	return file_prober_v1_agent_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *HopAddress) GetIp() string {
@@ -2322,7 +2575,7 @@ type JobFinished struct {
 
 func (x *JobFinished) Reset() {
 	*x = JobFinished{}
-	mi := &file_prober_v1_agent_proto_msgTypes[22]
+	mi := &file_prober_v1_agent_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2334,7 +2587,7 @@ func (x *JobFinished) String() string {
 func (*JobFinished) ProtoMessage() {}
 
 func (x *JobFinished) ProtoReflect() protoreflect.Message {
-	mi := &file_prober_v1_agent_proto_msgTypes[22]
+	mi := &file_prober_v1_agent_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2347,7 +2600,7 @@ func (x *JobFinished) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobFinished.ProtoReflect.Descriptor instead.
 func (*JobFinished) Descriptor() ([]byte, []int) {
-	return file_prober_v1_agent_proto_rawDescGZIP(), []int{22}
+	return file_prober_v1_agent_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *JobFinished) GetCycles() uint32 {
@@ -2376,7 +2629,7 @@ type JobError struct {
 
 func (x *JobError) Reset() {
 	*x = JobError{}
-	mi := &file_prober_v1_agent_proto_msgTypes[23]
+	mi := &file_prober_v1_agent_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2388,7 +2641,7 @@ func (x *JobError) String() string {
 func (*JobError) ProtoMessage() {}
 
 func (x *JobError) ProtoReflect() protoreflect.Message {
-	mi := &file_prober_v1_agent_proto_msgTypes[23]
+	mi := &file_prober_v1_agent_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2401,7 +2654,7 @@ func (x *JobError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobError.ProtoReflect.Descriptor instead.
 func (*JobError) Descriptor() ([]byte, []int) {
-	return file_prober_v1_agent_proto_rawDescGZIP(), []int{23}
+	return file_prober_v1_agent_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *JobError) GetCode() JobError_Code {
@@ -2468,13 +2721,14 @@ const file_prober_v1_agent_proto_rawDesc = "" +
 	"\aWelcome\x12\x12\n" +
 	"\x04site\x18\x01 \x01(\tR\x04site\x12.\n" +
 	"\x04time\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x04time\x122\n" +
-	"\x15heartbeat_interval_ms\x18\x03 \x01(\rR\x13heartbeatIntervalMs\"\x95\x01\n" +
+	"\x15heartbeat_interval_ms\x18\x03 \x01(\rR\x13heartbeatIntervalMs\"\xbd\x01\n" +
 	"\bStartJob\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12,\n" +
 	"\x05trace\x18\n" +
 	" \x01(\v2\x14.prober.v1.TraceSpecH\x00R\x05trace\x12<\n" +
 	"\vsip_options\x18\v \x01(\v2\x19.prober.v1.SipOptionsSpecH\x00R\n" +
-	"sipOptionsB\x06\n" +
+	"sipOptions\x12&\n" +
+	"\x03dns\x18\f \x01(\v2\x12.prober.v1.DnsSpecH\x00R\x03dnsB\x06\n" +
 	"\x04spec\"\"\n" +
 	"\tCancelJob\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\"V\n" +
@@ -2545,7 +2799,22 @@ const file_prober_v1_agent_proto_rawDesc = "" +
 	"\ttls_valid\x18\t \x01(\bR\btlsValid\x12\x1b\n" +
 	"\ttls_error\x18\n" +
 	" \x01(\tR\btlsErrorB\t\n" +
-	"\a_rtt_us\"\xe3\x02\n" +
+	"\a_rtt_us\"<\n" +
+	"\aDnsSpec\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1d\n" +
+	"\n" +
+	"timeout_ms\x18\x02 \x01(\rR\ttimeoutMs\"\x90\x01\n" +
+	"\tDnsResult\x12\x12\n" +
+	"\x04type\x18\x01 \x01(\tR\x04type\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12.\n" +
+	"\arecords\x18\x03 \x03(\v2\x14.prober.v1.DnsRecordR\arecords\x12\x14\n" +
+	"\x05error\x18\x04 \x01(\tR\x05error\x12\x15\n" +
+	"\x06rtt_us\x18\x05 \x01(\rR\x05rttUs\"i\n" +
+	"\tDnsRecord\x12\x14\n" +
+	"\x05value\x18\x01 \x01(\tR\x05value\x12\x1a\n" +
+	"\bpriority\x18\x02 \x01(\rR\bpriority\x12\x16\n" +
+	"\x06weight\x18\x03 \x01(\rR\x06weight\x12\x12\n" +
+	"\x04port\x18\x04 \x01(\rR\x04port\"\x9a\x03\n" +
 	"\bJobEvent\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x10\n" +
 	"\x03seq\x18\x02 \x01(\x04R\x03seq\x12.\n" +
@@ -2556,8 +2825,10 @@ const file_prober_v1_agent_proto_rawDesc = "" +
 	"\bfinished\x18\f \x01(\v2\x16.prober.v1.JobFinishedH\x00R\bfinished\x12+\n" +
 	"\x05error\x18\r \x01(\v2\x13.prober.v1.JobErrorH\x00R\x05error\x125\n" +
 	"\n" +
-	"sip_result\x18\x0e \x01(\v2\x14.prober.v1.SipResultH\x00R\tsipResultB\a\n" +
-	"\x05event\"\xd9\x01\n" +
+	"sip_result\x18\x0e \x01(\v2\x14.prober.v1.SipResultH\x00R\tsipResult\x125\n" +
+	"\n" +
+	"dns_result\x18\x0f \x01(\v2\x14.prober.v1.DnsResultH\x00R\tdnsResultB\a\n" +
+	"\x05event\"\xfb\x01\n" +
 	"\n" +
 	"JobStarted\x12\x16\n" +
 	"\x06target\x18\x01 \x01(\tR\x06target\x12\x1a\n" +
@@ -2565,7 +2836,8 @@ const file_prober_v1_agent_proto_rawDesc = "" +
 	"\x06source\x18\x03 \x01(\tR\x06source\x12/\n" +
 	"\bprotocol\x18\x04 \x01(\x0e2\x13.prober.v1.ProtocolR\bprotocol\x120\n" +
 	"\x06family\x18\x05 \x01(\x0e2\x18.prober.v1.AddressFamilyR\x06family\x12\x1c\n" +
-	"\ttransport\x18\x06 \x01(\tR\ttransport\"b\n" +
+	"\ttransport\x18\x06 \x01(\tR\ttransport\x12 \n" +
+	"\vnameservers\x18\a \x03(\tR\vnameservers\"b\n" +
 	"\x05Cycle\x12\x16\n" +
 	"\x06number\x18\x01 \x01(\rR\x06number\x12\x1d\n" +
 	"\n" +
@@ -2644,7 +2916,7 @@ func file_prober_v1_agent_proto_rawDescGZIP() []byte {
 }
 
 var file_prober_v1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
-var file_prober_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
+var file_prober_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
 var file_prober_v1_agent_proto_goTypes = []any{
 	(Protocol)(0),                 // 0: prober.v1.Protocol
 	(AddressFamily)(0),            // 1: prober.v1.AddressFamily
@@ -2669,20 +2941,23 @@ var file_prober_v1_agent_proto_goTypes = []any{
 	(*TraceSpec)(nil),             // 20: prober.v1.TraceSpec
 	(*SipOptionsSpec)(nil),        // 21: prober.v1.SipOptionsSpec
 	(*SipResult)(nil),             // 22: prober.v1.SipResult
-	(*JobEvent)(nil),              // 23: prober.v1.JobEvent
-	(*JobStarted)(nil),            // 24: prober.v1.JobStarted
-	(*Cycle)(nil),                 // 25: prober.v1.Cycle
-	(*Hop)(nil),                   // 26: prober.v1.Hop
-	(*HopAddress)(nil),            // 27: prober.v1.HopAddress
-	(*JobFinished)(nil),           // 28: prober.v1.JobFinished
-	(*JobError)(nil),              // 29: prober.v1.JobError
-	nil,                           // 30: prober.v1.Monitor.LabelsEntry
-	(*timestamppb.Timestamp)(nil), // 31: google.protobuf.Timestamp
+	(*DnsSpec)(nil),               // 23: prober.v1.DnsSpec
+	(*DnsResult)(nil),             // 24: prober.v1.DnsResult
+	(*DnsRecord)(nil),             // 25: prober.v1.DnsRecord
+	(*JobEvent)(nil),              // 26: prober.v1.JobEvent
+	(*JobStarted)(nil),            // 27: prober.v1.JobStarted
+	(*Cycle)(nil),                 // 28: prober.v1.Cycle
+	(*Hop)(nil),                   // 29: prober.v1.Hop
+	(*HopAddress)(nil),            // 30: prober.v1.HopAddress
+	(*JobFinished)(nil),           // 31: prober.v1.JobFinished
+	(*JobError)(nil),              // 32: prober.v1.JobError
+	nil,                           // 33: prober.v1.Monitor.LabelsEntry
+	(*timestamppb.Timestamp)(nil), // 34: google.protobuf.Timestamp
 }
 var file_prober_v1_agent_proto_depIdxs = []int32{
 	8,  // 0: prober.v1.AgentMessage.hello:type_name -> prober.v1.Hello
 	11, // 1: prober.v1.AgentMessage.heartbeat:type_name -> prober.v1.Heartbeat
-	23, // 2: prober.v1.AgentMessage.event:type_name -> prober.v1.JobEvent
+	26, // 2: prober.v1.AgentMessage.event:type_name -> prober.v1.JobEvent
 	19, // 3: prober.v1.AgentMessage.pong:type_name -> prober.v1.Pong
 	12, // 4: prober.v1.BackendMessage.welcome:type_name -> prober.v1.Welcome
 	13, // 5: prober.v1.BackendMessage.start:type_name -> prober.v1.StartJob
@@ -2692,39 +2967,42 @@ var file_prober_v1_agent_proto_depIdxs = []int32{
 	18, // 9: prober.v1.BackendMessage.ping:type_name -> prober.v1.Ping
 	9,  // 10: prober.v1.Hello.capabilities:type_name -> prober.v1.Capabilities
 	10, // 11: prober.v1.Hello.limits:type_name -> prober.v1.Limits
-	31, // 12: prober.v1.Hello.started_at:type_name -> google.protobuf.Timestamp
-	31, // 13: prober.v1.Heartbeat.time:type_name -> google.protobuf.Timestamp
-	31, // 14: prober.v1.Welcome.time:type_name -> google.protobuf.Timestamp
+	34, // 12: prober.v1.Hello.started_at:type_name -> google.protobuf.Timestamp
+	34, // 13: prober.v1.Heartbeat.time:type_name -> google.protobuf.Timestamp
+	34, // 14: prober.v1.Welcome.time:type_name -> google.protobuf.Timestamp
 	20, // 15: prober.v1.StartJob.trace:type_name -> prober.v1.TraceSpec
 	21, // 16: prober.v1.StartJob.sip_options:type_name -> prober.v1.SipOptionsSpec
-	16, // 17: prober.v1.Assignment.monitors:type_name -> prober.v1.Monitor
-	30, // 18: prober.v1.Monitor.labels:type_name -> prober.v1.Monitor.LabelsEntry
-	20, // 19: prober.v1.Monitor.trace:type_name -> prober.v1.TraceSpec
-	21, // 20: prober.v1.Monitor.sip_options:type_name -> prober.v1.SipOptionsSpec
-	0,  // 21: prober.v1.TraceSpec.protocol:type_name -> prober.v1.Protocol
-	1,  // 22: prober.v1.TraceSpec.family:type_name -> prober.v1.AddressFamily
-	2,  // 23: prober.v1.TraceSpec.mode:type_name -> prober.v1.TraceMode
-	3,  // 24: prober.v1.SipOptionsSpec.transport:type_name -> prober.v1.SipTransport
-	1,  // 25: prober.v1.SipOptionsSpec.family:type_name -> prober.v1.AddressFamily
-	31, // 26: prober.v1.JobEvent.time:type_name -> google.protobuf.Timestamp
-	24, // 27: prober.v1.JobEvent.started:type_name -> prober.v1.JobStarted
-	25, // 28: prober.v1.JobEvent.cycle:type_name -> prober.v1.Cycle
-	28, // 29: prober.v1.JobEvent.finished:type_name -> prober.v1.JobFinished
-	29, // 30: prober.v1.JobEvent.error:type_name -> prober.v1.JobError
-	22, // 31: prober.v1.JobEvent.sip_result:type_name -> prober.v1.SipResult
-	0,  // 32: prober.v1.JobStarted.protocol:type_name -> prober.v1.Protocol
-	1,  // 33: prober.v1.JobStarted.family:type_name -> prober.v1.AddressFamily
-	26, // 34: prober.v1.Cycle.hops:type_name -> prober.v1.Hop
-	27, // 35: prober.v1.Hop.addresses:type_name -> prober.v1.HopAddress
-	4,  // 36: prober.v1.JobFinished.reason:type_name -> prober.v1.JobFinished.Reason
-	5,  // 37: prober.v1.JobError.code:type_name -> prober.v1.JobError.Code
-	6,  // 38: prober.v1.AgentGateway.Session:input_type -> prober.v1.AgentMessage
-	7,  // 39: prober.v1.AgentGateway.Session:output_type -> prober.v1.BackendMessage
-	39, // [39:40] is the sub-list for method output_type
-	38, // [38:39] is the sub-list for method input_type
-	38, // [38:38] is the sub-list for extension type_name
-	38, // [38:38] is the sub-list for extension extendee
-	0,  // [0:38] is the sub-list for field type_name
+	23, // 17: prober.v1.StartJob.dns:type_name -> prober.v1.DnsSpec
+	16, // 18: prober.v1.Assignment.monitors:type_name -> prober.v1.Monitor
+	33, // 19: prober.v1.Monitor.labels:type_name -> prober.v1.Monitor.LabelsEntry
+	20, // 20: prober.v1.Monitor.trace:type_name -> prober.v1.TraceSpec
+	21, // 21: prober.v1.Monitor.sip_options:type_name -> prober.v1.SipOptionsSpec
+	0,  // 22: prober.v1.TraceSpec.protocol:type_name -> prober.v1.Protocol
+	1,  // 23: prober.v1.TraceSpec.family:type_name -> prober.v1.AddressFamily
+	2,  // 24: prober.v1.TraceSpec.mode:type_name -> prober.v1.TraceMode
+	3,  // 25: prober.v1.SipOptionsSpec.transport:type_name -> prober.v1.SipTransport
+	1,  // 26: prober.v1.SipOptionsSpec.family:type_name -> prober.v1.AddressFamily
+	25, // 27: prober.v1.DnsResult.records:type_name -> prober.v1.DnsRecord
+	34, // 28: prober.v1.JobEvent.time:type_name -> google.protobuf.Timestamp
+	27, // 29: prober.v1.JobEvent.started:type_name -> prober.v1.JobStarted
+	28, // 30: prober.v1.JobEvent.cycle:type_name -> prober.v1.Cycle
+	31, // 31: prober.v1.JobEvent.finished:type_name -> prober.v1.JobFinished
+	32, // 32: prober.v1.JobEvent.error:type_name -> prober.v1.JobError
+	22, // 33: prober.v1.JobEvent.sip_result:type_name -> prober.v1.SipResult
+	24, // 34: prober.v1.JobEvent.dns_result:type_name -> prober.v1.DnsResult
+	0,  // 35: prober.v1.JobStarted.protocol:type_name -> prober.v1.Protocol
+	1,  // 36: prober.v1.JobStarted.family:type_name -> prober.v1.AddressFamily
+	29, // 37: prober.v1.Cycle.hops:type_name -> prober.v1.Hop
+	30, // 38: prober.v1.Hop.addresses:type_name -> prober.v1.HopAddress
+	4,  // 39: prober.v1.JobFinished.reason:type_name -> prober.v1.JobFinished.Reason
+	5,  // 40: prober.v1.JobError.code:type_name -> prober.v1.JobError.Code
+	6,  // 41: prober.v1.AgentGateway.Session:input_type -> prober.v1.AgentMessage
+	7,  // 42: prober.v1.AgentGateway.Session:output_type -> prober.v1.BackendMessage
+	42, // [42:43] is the sub-list for method output_type
+	41, // [41:42] is the sub-list for method input_type
+	41, // [41:41] is the sub-list for extension type_name
+	41, // [41:41] is the sub-list for extension extendee
+	0,  // [0:41] is the sub-list for field type_name
 }
 
 func init() { file_prober_v1_agent_proto_init() }
@@ -2749,27 +3027,29 @@ func file_prober_v1_agent_proto_init() {
 	file_prober_v1_agent_proto_msgTypes[7].OneofWrappers = []any{
 		(*StartJob_Trace)(nil),
 		(*StartJob_SipOptions)(nil),
+		(*StartJob_Dns)(nil),
 	}
 	file_prober_v1_agent_proto_msgTypes[10].OneofWrappers = []any{
 		(*Monitor_Trace)(nil),
 		(*Monitor_SipOptions)(nil),
 	}
 	file_prober_v1_agent_proto_msgTypes[16].OneofWrappers = []any{}
-	file_prober_v1_agent_proto_msgTypes[17].OneofWrappers = []any{
+	file_prober_v1_agent_proto_msgTypes[20].OneofWrappers = []any{
 		(*JobEvent_Started)(nil),
 		(*JobEvent_Cycle)(nil),
 		(*JobEvent_Finished)(nil),
 		(*JobEvent_Error)(nil),
 		(*JobEvent_SipResult)(nil),
+		(*JobEvent_DnsResult)(nil),
 	}
-	file_prober_v1_agent_proto_msgTypes[20].OneofWrappers = []any{}
+	file_prober_v1_agent_proto_msgTypes[23].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_prober_v1_agent_proto_rawDesc), len(file_prober_v1_agent_proto_rawDesc)),
 			NumEnums:      6,
-			NumMessages:   25,
+			NumMessages:   28,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

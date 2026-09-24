@@ -220,7 +220,7 @@ async function copyReport(s: SiteState) {
           </div>
           <table>
             <thead>
-              <tr><th>#</th><th>Host</th><th>Loss</th><th>Snt</th><th>Last</th><th>Avg</th><th>Best</th><th>Worst</th><th>StDev</th></tr>
+              <tr><th>#</th><th>Host</th><th>Loss</th><th>Snt</th><th>Rcvd</th><th>Last</th><th>Avg</th><th>Best</th><th>Worst</th><th>StDev</th></tr>
             </thead>
             <tbody>
               <tr v-for="h in s.hops" :key="h.ttl" :class="{ dest: h.ttl === s.reachedAt }">
@@ -233,6 +233,7 @@ async function copyReport(s: SiteState) {
                 </td>
                 <td class="num" :class="{ warnloss: h.loss_pct > 0 }">{{ lossPct(h.loss_pct) }}%</td>
                 <td class="num">{{ h.sent }}</td>
+                <td class="num">{{ h.received }}</td>
                 <td class="num">{{ ms(h.last_us) }}</td>
                 <td class="num">{{ ms(h.avg_us) }}</td>
                 <td class="num">{{ ms(h.best_us) }}</td>

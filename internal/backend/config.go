@@ -79,24 +79,24 @@ type MonitorConfig struct {
 
 // TraceParams are the trace/ping probe parameters for a monitor.
 type TraceParams struct {
-	Protocol     string `yaml:"protocol"`
-	Family       string `yaml:"family"`
-	Port         uint32 `yaml:"port"`
-	Cycles       uint32 `yaml:"cycles"`
-	IntervalMS   uint32 `yaml:"interval_ms"`
-	FirstTTL     uint32 `yaml:"first_ttl"`
-	MaxTTL       uint32 `yaml:"max_ttl"`
-	ResolveNames bool   `yaml:"resolve_names"`
+	Protocol     string `yaml:"protocol" json:"protocol"`
+	Family       string `yaml:"family" json:"family"`
+	Port         uint32 `yaml:"port" json:"port"`
+	Cycles       uint32 `yaml:"cycles" json:"cycles"`
+	IntervalMS   uint32 `yaml:"interval_ms" json:"interval_ms"`
+	FirstTTL     uint32 `yaml:"first_ttl" json:"first_ttl"`
+	MaxTTL       uint32 `yaml:"max_ttl" json:"max_ttl"`
+	ResolveNames bool   `yaml:"resolve_names" json:"resolve_names"`
 }
 
 // SipParams are the SIP OPTIONS probe parameters for a monitor.
 type SipParams struct {
-	Transport  string `yaml:"transport"`
-	Family     string `yaml:"family"`
-	Port       uint32 `yaml:"port"`
-	Cycles     uint32 `yaml:"cycles"`
-	IntervalMS uint32 `yaml:"interval_ms"`
-	TimeoutMS  uint32 `yaml:"timeout_ms"`
+	Transport  string `yaml:"transport" json:"transport"`
+	Family     string `yaml:"family" json:"family"`
+	Port       uint32 `yaml:"port" json:"port"`
+	Cycles     uint32 `yaml:"cycles" json:"cycles"`
+	IntervalMS uint32 `yaml:"interval_ms" json:"interval_ms"`
+	TimeoutMS  uint32 `yaml:"timeout_ms" json:"timeout_ms"`
 }
 
 // VictoriaLogsConfig points the trace/mtr log shipper at a VictoriaLogs

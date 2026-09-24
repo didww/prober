@@ -86,15 +86,7 @@ export async function listAgents(): Promise<Agent[]> {
 }
 
 export async function startRun(req: StartRequest): Promise<{ id: string; sites: string[] }> {
-  const res = await check(
-    await fetch(apiURL('runs'), {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(req),
-      credentials: 'same-origin',
-    }),
-  )
-  return res.json()
+  return postJSON('runs', req)
 }
 
 export async function cancelRun(id: string): Promise<void> {
@@ -137,15 +129,134 @@ export type SipRunEvent =
   | { type: 'error'; seq: number; site: string; code: string; message: string }
 
 export async function startSipRun(req: SipStartRequest): Promise<{ id: string; sites: string[] }> {
-  const res = await check(
-    await fetch(apiURL('sip-runs'), {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(req),
-      credentials: 'same-origin',
-    }),
-  )
-  return res.json()
+  return postJSON('sip-runs', req)
+}
+
+// --- DNS lookup ---------------------------------------------------------------
+
+export interface DnsStartRequest {
+  name: string
+  sites: string[]
+  timeout_ms?: number
+}
+
+// One answer: the address for A and AAAA, the target host plus priority,
+// weight and port for SRV.
+export interface DnsRecord {
+  value: string
+  priority: number
+  weight: number
+  port: number
+}
+
+export type DnsRunEvent =
+  | { type: 'started'; seq: number; site: string; target: string; nameservers?: string[] }
+  | {
+      type: 'dns_result'
+      seq: number
+      site: string
+      record_type: string
+      name: string
+      records: DnsRecord[]
+      error: string
+      rtt_us: number
+    }
+  | { type: 'finished'; seq: number; site: string; reason: string }
+  | { type: 'error'; seq: number; site: string; code: string; message: string }
+
+export async function startDnsRun(req: DnsStartRequest): Promise<{ id: string; sites: string[] }> {
+  return postJSON('dns-runs', req)
+}
+
+// --- Monitors ------------------------------------------------------------------
+
+export interface MonitorTraceParams {
+  protocol: string
+  family: string
+  port: number
+  cycles: number
+  interval_ms: number
+  first_ttl: number
+  max_ttl: number
+  resolve_names: boolean
+}
+
+export interface MonitorSipParams {
+  transport: string
+  family: string
+  port: number
+  cycles: number
+  interval_ms: number
+  timeout_ms: number
+}
+
+// One site's latest outcome for a monitor. up is null and at empty until the
+// site has reported a result.
+export interface MonitorSiteStatus {
+  site: string
+  connected: boolean
+  at: string
+  up: boolean | null
+  resolved: string
+  source: string
+  loss_pct: number
+  rtt_ms: number | null
+  reached: boolean
+  cycles: number
+  hops: number
+  code: number
+  reason: string
+  responded: boolean
+  error: string
+}
+
+export interface Monitor {
+  id: string
+  kind: 'trace' | 'ping' | 'sip'
+  target: string
+  interval_s: number
+  sites: string[]
+  labels: Record<string, string>
+  trace?: MonitorTraceParams
+  sip?: MonitorSipParams
+  // Whether reports can be fetched: a trace monitor with VictoriaLogs on.
+  history: boolean
+  status: MonitorSiteStatus[]
+}
+
+// One shipped trace: the summary for its row and the mtr text.
+export interface TraceReport {
+  time: string
+  site: string
+  target: string
+  resolved: string
+  source: string
+  reached: boolean
+  loss_pct: number
+  avg_ms: number | null
+  cycles: number
+  hops: number
+  error: string
+  report: string
+}
+
+export type ReportRange = '1h' | '6h' | '24h' | '7d' | '30d'
+export const REPORT_RANGES: ReportRange[] = ['1h', '6h', '24h', '7d', '30d']
+
+export async function listMonitors(): Promise<Monitor[]> {
+  return (await getJSON<Monitor[] | null>('monitors')) ?? []
+}
+
+export async function listTraceReports(
+  id: string,
+  opts: { site?: string; range?: ReportRange; limit?: number } = {},
+): Promise<TraceReport[]> {
+  const q = new URLSearchParams()
+  if (opts.site) q.set('site', opts.site)
+  if (opts.range) q.set('range', opts.range)
+  if (opts.limit) q.set('limit', String(opts.limit))
+  const qs = q.toString()
+  return (await getJSON<TraceReport[] | null>(`monitors/${encodeURIComponent(id)}/reports${qs ? '?' + qs : ''}`)) ?? []
 }
 
 // subscribe opens the run's SSE stream. The browser reconnects on its own and
@@ -188,6 +299,18 @@ export function subscribe<T>(
 
 async function getJSON<T>(path: string): Promise<T> {
   const res = await check(await fetch(apiURL(path), { credentials: 'same-origin' }))
+  return (await res.json()) as T
+}
+
+async function postJSON<T>(path: string, body: unknown): Promise<T> {
+  const res = await check(
+    await fetch(apiURL(path), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+      credentials: 'same-origin',
+    }),
+  )
   return (await res.json()) as T
 }
 

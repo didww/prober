@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -107,4 +108,43 @@ func TestDisabledClientIsNoop(t *testing.T) {
 	}
 	c.Write(Record{"_msg": "x"}) // must not panic or block
 	c.Run(context.Background())  // must return immediately
+}
+
+func TestClientQuery(t *testing.T) {
+	var gotPath, gotQuery, gotAccount, gotUser string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_ = r.ParseForm()
+		gotQuery = r.Form.Get("query")
+		gotAccount = r.Header.Get("AccountID")
+		gotUser, _, _ = r.BasicAuth()
+		// Two lines, one typed value to prove flattening, then a trailing newline.
+		_, _ = io.WriteString(w, `{"_time":"2026-09-24T10:00:00Z","_msg":"first","n":"1"}`+"\n")
+		_, _ = io.WriteString(w, `{"_time":"2026-09-24T09:00:00Z","_msg":"second","n":2,"ok":true}`+"\n")
+	}))
+	defer srv.Close()
+
+	c := New(Options{URL: srv.URL + "/", Username: "u", Password: "p", AccountID: 7}, testLogger())
+	recs, err := c.Query(context.Background(), `{monitor="m"} _time:1h | limit 2`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotPath != "/select/logsql/query" || gotQuery != `{monitor="m"} _time:1h | limit 2` || gotAccount != "7" || gotUser != "u" {
+		t.Errorf("request: path=%q query=%q account=%q user=%q", gotPath, gotQuery, gotAccount, gotUser)
+	}
+	if len(recs) != 2 || recs[0]["_msg"] != "first" || recs[1]["_msg"] != "second" || recs[1]["n"] != "2" || recs[1]["ok"] != "true" {
+		t.Errorf("records: %+v", recs)
+	}
+
+	// A non-2xx is an error carrying the body; a disabled client refuses.
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "cannot parse query", http.StatusBadRequest)
+	}))
+	defer bad.Close()
+	if _, err := New(Options{URL: bad.URL}, testLogger()).Query(context.Background(), "x"); err == nil || !strings.Contains(err.Error(), "cannot parse query") {
+		t.Errorf("bad status: err = %v", err)
+	}
+	if _, err := New(Options{}, testLogger()).Query(context.Background(), "x"); !errors.Is(err, ErrDisabled) {
+		t.Errorf("disabled: err = %v", err)
+	}
 }

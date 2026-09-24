@@ -26,6 +26,9 @@ func eventJSON(se *StreamEvent) ([]byte, string, []byte) {
 		out["protocol"] = e.Started.Protocol.String()
 		out["family"] = e.Started.Family.String()
 		out["transport"] = e.Started.Transport
+		if len(e.Started.Nameservers) > 0 {
+			out["nameservers"] = e.Started.Nameservers
+		}
 	case *pb.JobEvent_Cycle:
 		typ = "cycle"
 		out["number"] = e.Cycle.Number
@@ -56,6 +59,16 @@ func eventJSON(se *StreamEvent) ([]byte, string, []byte) {
 		} else {
 			out["rtt_us"] = nil
 		}
+	case *pb.JobEvent_DnsResult:
+		typ = "dns_result"
+		r := e.DnsResult
+		// "type" is the event discriminator, so the record type goes by
+		// another name.
+		out["record_type"] = r.Type
+		out["name"] = r.Name
+		out["records"] = dnsRecordsJSON(r.Records)
+		out["error"] = r.Error
+		out["rtt_us"] = r.RttUs
 	default:
 		typ = "unknown"
 	}
@@ -90,6 +103,21 @@ func hopsJSON(hops []*pb.Hop) []map[string]any {
 			m["sample_us"] = nil
 		}
 		out[i] = m
+	}
+	return out
+}
+
+// dnsRecordsJSON is always an array, never null, so the client can index it
+// without a guard.
+func dnsRecordsJSON(recs []*pb.DnsRecord) []map[string]any {
+	out := make([]map[string]any, len(recs))
+	for i, r := range recs {
+		out[i] = map[string]any{
+			"value":    r.Value,
+			"priority": r.Priority,
+			"weight":   r.Weight,
+			"port":     r.Port,
+		}
 	}
 	return out
 }

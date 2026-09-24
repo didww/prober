@@ -53,6 +53,17 @@ func (r *MonitorRegistry) Version() uint64 {
 	return r.version
 }
 
+// List returns every configured monitor, in config order.
+func (r *MonitorRegistry) List() []MonitorConfig {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]MonitorConfig, 0, len(r.order))
+	for _, id := range r.order {
+		out = append(out, r.byID[id])
+	}
+	return out
+}
+
 // lookup returns a monitor's config by id (for the metrics/log sink).
 func (r *MonitorRegistry) lookup(id string) (MonitorConfig, bool) {
 	r.mu.RLock()

@@ -90,12 +90,15 @@ func New(ctx context.Context, cfg Config, log *slog.Logger, version, commit stri
 		log.Warn("authentication is disabled: every browser request is anonymous")
 	}
 
+	api := NewAPI(gw, mgr, a, log, version, commit)
+	api.SetMonitoring(reg, sink, vl)
+
 	return &Server{
 		cfg:     cfg,
 		log:     log,
 		gw:      gw,
 		mgr:     mgr,
-		api:     NewAPI(gw, mgr, a, log, version, commit),
+		api:     api,
 		auth:    a,
 		version: version,
 		commit:  commit,

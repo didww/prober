@@ -26,6 +26,7 @@ import (
 type Config struct {
 	Backend BackendConfig `yaml:"backend"`
 	Limits  Limits        `yaml:"limits"`
+	DNS     DNSConfig     `yaml:"dns"`
 }
 
 // Limits bound what this agent will run, and are reported to the backend in
@@ -64,7 +65,8 @@ type Agent struct {
 	version  string
 	commit   string
 	hostname string
-	sources  []string // egress source addresses, computed once at startup
+	sources  []string    // egress source addresses, computed once at startup
+	dns      *dns.Client // the DNS tool's nameservers; nil means the host's
 
 	seq  sequence
 	jobs jobTable
@@ -85,6 +87,10 @@ func New(cfg Config, log *slog.Logger, build BuildInfo) (*Agent, error) {
 		return nil, err
 	}
 	tlsCfg, err := cfg.Backend.tlsConfig()
+	if err != nil {
+		return nil, err
+	}
+	dnsClient, err := cfg.DNS.client()
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +115,11 @@ func New(cfg Config, log *slog.Logger, build BuildInfo) (*Agent, error) {
 		commit:   build.Commit,
 		hostname: host,
 		sources:  egressSources(eng.Capabilities()),
+		dns:      dnsClient,
 		jobs:     jobTable{m: map[string]context.CancelFunc{}},
+	}
+	if dnsClient != nil {
+		log.Info("DNS tool nameservers overridden", "nameservers", dnsClient.Nameservers)
 	}
 	if len(a.sources) > 0 {
 		log.Info("egress source addresses", "sources", a.sources)
@@ -419,7 +429,7 @@ func (a *Agent) startDns(ctx context.Context, job *pb.StartJob, send func(*pb.Ag
 
 	go func() {
 		defer a.jobs.remove(job.JobId)
-		err := dns.Run(jobCtx, spec, nil, func(ev dns.Event) {
+		err := dns.Run(jobCtx, spec, a.dns, func(ev dns.Event) {
 			je := dnsEventToProto(job.JobId, a.seq.next(), ev)
 			_ = send(&pb.AgentMessage{Msg: &pb.AgentMessage_Event{Event: je}})
 		})

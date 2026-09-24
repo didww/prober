@@ -18,12 +18,14 @@ import (
 	pb "github.com/didww/prober/api/gen/prober/v1"
 	"github.com/didww/prober/internal/agent"
 	"github.com/didww/prober/internal/backend"
+	"github.com/didww/prober/internal/dns/dnstest"
 	"github.com/didww/prober/internal/trace"
 )
 
 // connectAgent serves gw over TLS on loopback and runs a real agent against it
-// as site "testsite", returning once the agent has registered.
-func connectAgent(t *testing.T, gw *backend.Gateway) {
+// as site "testsite", with the DNS tool pointed at nameservers, returning once
+// the agent has registered.
+func connectAgent(t *testing.T, gw *backend.Gateway, nameservers []string) {
 	t.Helper()
 	log := itLogger()
 
@@ -38,12 +40,15 @@ func connectAgent(t *testing.T, gw *backend.Gateway) {
 	go grpcSrv.Serve(ln)
 	t.Cleanup(grpcSrv.Stop)
 
-	acfg := agent.Config{Backend: agent.BackendConfig{
-		Address:            ln.Addr().String(),
-		Site:               "testsite",
-		Token:              "shared",
-		InsecureSkipVerify: true,
-	}}
+	acfg := agent.Config{
+		Backend: agent.BackendConfig{
+			Address:            ln.Addr().String(),
+			Site:               "testsite",
+			Token:              "shared",
+			InsecureSkipVerify: true,
+		},
+		DNS: agent.DNSConfig{Nameservers: nameservers},
+	}
 	ag, err := agent.New(acfg, log, agent.BuildInfo{Version: "test", Commit: "abc"})
 	if err != nil {
 		t.Fatalf("agent.New: %v", err)
@@ -97,11 +102,10 @@ func readSSE(t *testing.T, url string) []map[string]any {
 }
 
 // TestDnsRunEndToEnd starts a DNS run through the HTTP API against a real
-// agent and checks the events that come back over SSE. It resolves
-// "localhost", which the hosts file answers, so it works without a network;
-// the SRV lookups need a nameserver and are only checked to be reported. Like
-// the monitoring test it needs raw sockets to build the agent, so it skips
-// outside `unshare -Urn`.
+// agent whose DNS tool is pointed at a fake nameserver on loopback, and checks
+// the answers that come back over SSE: codes, records, TTLs, SRV target
+// addresses, and the answering server. Like the monitoring test it needs raw
+// sockets to build the agent, so it skips outside `unshare -Urn`.
 func TestDnsRunEndToEnd(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test")
@@ -113,24 +117,20 @@ func TestDnsRunEndToEnd(t *testing.T) {
 	eng.Close()
 
 	log := itLogger()
+	ns := dnstest.Start(t, map[string]dnstest.Answer{
+		"A example.test":             {Addrs: []string{"192.0.2.1"}},
+		"AAAA example.test":          {},
+		"SRV _sip._udp.example.test": {SRV: []dnstest.SRV{{Target: "sip.example.test", Priority: 10, Weight: 5, Port: 5060}}},
+		"A sip.example.test":         {Addrs: []string{"192.0.2.2"}},
+	})
 	gw := backend.NewGateway(backend.Config{AgentToken: "shared"}, log)
-	connectAgent(t, gw)
+	connectAgent(t, gw, []string{ns.Addr})
 
 	mgr := backend.NewManager(gw, time.Minute)
 	api := httptest.NewServer(backend.NewAPI(gw, mgr, nil, log, "test", "abc").Routes())
 	defer api.Close()
 
-	// An address is refused up front: there is nothing to look up.
-	resp, err := http.Post(api.URL+"/dns-runs", "application/json", strings.NewReader(`{"name":"127.0.0.1"}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("address literal: HTTP %d, want 400", resp.StatusCode)
-	}
-
-	resp, err = http.Post(api.URL+"/dns-runs", "application/json", strings.NewReader(`{"name":"LocalHost.","timeout_ms":1000}`))
+	resp, err := http.Post(api.URL+"/dns-runs", "application/json", strings.NewReader(`{"name":"Example.TEST.","timeout_ms":5000}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,22 +159,26 @@ func TestDnsRunEndToEnd(t *testing.T) {
 	if n := len(byType["started"]); n != 1 {
 		t.Fatalf("got %d started events, want 1: %v", n, events)
 	}
-	if st := byType["started"][0]; st["site"] != "testsite" || st["target"] != "localhost" {
+	if st := byType["started"][0]; st["site"] != "testsite" || st["target"] != "example.test" {
 		t.Fatalf("started: %v", st)
+	}
+	if nss, _ := byType["started"][0]["nameservers"].([]any); len(nss) != 1 || nss[0] != ns.Addr {
+		t.Fatalf("started nameservers: %v", byType["started"][0]["nameservers"])
 	}
 	if n := len(byType["finished"]); n != 1 || byType["finished"][0]["reason"] != "REASON_COMPLETED" {
 		t.Fatalf("finished: %v", byType["finished"])
 	}
 
-	// Every question is answered exactly once, and the A answer is loopback.
+	// Every question is answered exactly once, by the fake nameserver.
 	want := map[string]bool{
-		"A localhost":              false,
-		"AAAA localhost":           false,
-		"SRV _sip._udp.localhost":  false,
-		"SRV _sip._tcp.localhost":  false,
-		"SRV _sip._tls.localhost":  false,
-		"SRV _sips._tcp.localhost": false,
+		"A example.test":              false,
+		"AAAA example.test":           false,
+		"SRV _sip._udp.example.test":  false,
+		"SRV _sip._tcp.example.test":  false,
+		"SRV _sip._tls.example.test":  false,
+		"SRV _sips._tcp.example.test": false,
 	}
+	byKey := map[string]map[string]any{}
 	for _, r := range byType["dns_result"] {
 		key := r["record_type"].(string) + " " + r["name"].(string)
 		seen, known := want[key]
@@ -182,18 +186,30 @@ func TestDnsRunEndToEnd(t *testing.T) {
 			t.Fatalf("unexpected or repeated result %q: %v", key, r)
 		}
 		want[key] = true
+		byKey[key] = r
 		if _, ok := r["records"].([]any); !ok {
 			t.Fatalf("%s: records is not an array: %v", key, r)
 		}
-		if _, ok := r["error"].(string); !ok {
-			t.Fatalf("%s: error is not a string: %v", key, r)
+		if r["error"] != "" || r["server"] != ns.Addr {
+			t.Fatalf("%s: not answered by the fake nameserver: %v", key, r)
 		}
-		if key == "A localhost" {
-			recs := r["records"].([]any)
-			if r["error"] != "" || len(recs) == 0 || recs[0].(map[string]any)["value"] != "127.0.0.1" {
-				t.Fatalf("A localhost: %v", r)
-			}
-		}
+	}
+	rec := func(r map[string]any, i int) map[string]any { return r["records"].([]any)[i].(map[string]any) }
+	if a := byKey["A example.test"]; a["status"] != "NOERROR" || len(a["records"].([]any)) != 1 || rec(a, 0)["value"] != "192.0.2.1" || rec(a, 0)["ttl"] != 300.0 {
+		t.Errorf("A: %v", a)
+	}
+	if aaaa := byKey["AAAA example.test"]; aaaa["status"] != "NODATA" || len(aaaa["records"].([]any)) != 0 {
+		t.Errorf("AAAA: %v", aaaa)
+	}
+	if srv := byKey["SRV _sip._udp.example.test"]; srv["status"] != "NOERROR" || len(srv["records"].([]any)) != 1 {
+		t.Errorf("SRV udp: %v", srv)
+	} else if r := rec(srv, 0); r["value"] != "sip.example.test" || r["port"] != 5060.0 || r["priority"] != 10.0 || r["address_status"] != "" {
+		t.Errorf("SRV udp record: %v", r)
+	} else if addrs, _ := r["addresses"].([]any); len(addrs) != 1 || addrs[0] != "192.0.2.2" {
+		t.Errorf("SRV udp target addresses: %v", r["addresses"])
+	}
+	if srv := byKey["SRV _sip._tcp.example.test"]; srv["status"] != "NXDOMAIN" || len(srv["records"].([]any)) != 0 {
+		t.Errorf("SRV tcp: %v", srv)
 	}
 	for key, seen := range want {
 		if !seen {

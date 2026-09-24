@@ -1889,10 +1889,16 @@ type DnsResult struct {
 	// The owner name queried, e.g. "_sip._udp.example.com".
 	Name    string       `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	Records []*DnsRecord `protobuf:"bytes,3,rep,name=records,proto3" json:"records,omitempty"`
-	// Empty when the query was answered, even with no records (NXDOMAIN and
-	// NODATA are answers); otherwise why it failed (timeout, SERVFAIL, ...).
-	Error         string `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`
-	RttUs         uint32 `protobuf:"varint,5,opt,name=rtt_us,json=rttUs,proto3" json:"rtt_us,omitempty"`
+	// Empty when a nameserver answered; otherwise why none did (timeout,
+	// unreachable, malformed reply).
+	Error string `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`
+	RttUs uint32 `protobuf:"varint,5,opt,name=rtt_us,json=rttUs,proto3" json:"rtt_us,omitempty"`
+	// The answer's response code by name (NOERROR, NXDOMAIN, SERVFAIL, REFUSED,
+	// ...), or NODATA for a NOERROR answer with no record of the asked type.
+	// Empty when no nameserver answered.
+	Status string `protobuf:"bytes,6,opt,name=status,proto3" json:"status,omitempty"`
+	// The nameserver that answered, as host:port.
+	Server        string `protobuf:"bytes,7,opt,name=server,proto3" json:"server,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1962,14 +1968,34 @@ func (x *DnsResult) GetRttUs() uint32 {
 	return 0
 }
 
+func (x *DnsResult) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *DnsResult) GetServer() string {
+	if x != nil {
+		return x.Server
+	}
+	return ""
+}
+
 type DnsRecord struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The address for A and AAAA; the target host for SRV.
 	Value string `protobuf:"bytes,1,opt,name=value,proto3" json:"value,omitempty"`
 	// SRV only.
-	Priority      uint32 `protobuf:"varint,2,opt,name=priority,proto3" json:"priority,omitempty"`
-	Weight        uint32 `protobuf:"varint,3,opt,name=weight,proto3" json:"weight,omitempty"`
-	Port          uint32 `protobuf:"varint,4,opt,name=port,proto3" json:"port,omitempty"`
+	Priority uint32 `protobuf:"varint,2,opt,name=priority,proto3" json:"priority,omitempty"`
+	Weight   uint32 `protobuf:"varint,3,opt,name=weight,proto3" json:"weight,omitempty"`
+	Port     uint32 `protobuf:"varint,4,opt,name=port,proto3" json:"port,omitempty"`
+	Ttl      uint32 `protobuf:"varint,5,opt,name=ttl,proto3" json:"ttl,omitempty"`
+	// SRV only: the target's A and AAAA addresses, looked up alongside, so a
+	// target that does not resolve shows beside its record. When empty,
+	// address_status says why (NXDOMAIN, NODATA, SERVFAIL, TIMEOUT, ...).
+	Addresses     []string `protobuf:"bytes,6,rep,name=addresses,proto3" json:"addresses,omitempty"`
+	AddressStatus string   `protobuf:"bytes,7,opt,name=address_status,json=addressStatus,proto3" json:"address_status,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2030,6 +2056,27 @@ func (x *DnsRecord) GetPort() uint32 {
 		return x.Port
 	}
 	return 0
+}
+
+func (x *DnsRecord) GetTtl() uint32 {
+	if x != nil {
+		return x.Ttl
+	}
+	return 0
+}
+
+func (x *DnsRecord) GetAddresses() []string {
+	if x != nil {
+		return x.Addresses
+	}
+	return nil
+}
+
+func (x *DnsRecord) GetAddressStatus() string {
+	if x != nil {
+		return x.AddressStatus
+	}
+	return ""
 }
 
 // JobEvent is anything an agent reports about a job. Every event carries the
@@ -2803,18 +2850,23 @@ const file_prober_v1_agent_proto_rawDesc = "" +
 	"\aDnsSpec\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1d\n" +
 	"\n" +
-	"timeout_ms\x18\x02 \x01(\rR\ttimeoutMs\"\x90\x01\n" +
+	"timeout_ms\x18\x02 \x01(\rR\ttimeoutMs\"\xc0\x01\n" +
 	"\tDnsResult\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12.\n" +
 	"\arecords\x18\x03 \x03(\v2\x14.prober.v1.DnsRecordR\arecords\x12\x14\n" +
 	"\x05error\x18\x04 \x01(\tR\x05error\x12\x15\n" +
-	"\x06rtt_us\x18\x05 \x01(\rR\x05rttUs\"i\n" +
+	"\x06rtt_us\x18\x05 \x01(\rR\x05rttUs\x12\x16\n" +
+	"\x06status\x18\x06 \x01(\tR\x06status\x12\x16\n" +
+	"\x06server\x18\a \x01(\tR\x06server\"\xc0\x01\n" +
 	"\tDnsRecord\x12\x14\n" +
 	"\x05value\x18\x01 \x01(\tR\x05value\x12\x1a\n" +
 	"\bpriority\x18\x02 \x01(\rR\bpriority\x12\x16\n" +
 	"\x06weight\x18\x03 \x01(\rR\x06weight\x12\x12\n" +
-	"\x04port\x18\x04 \x01(\rR\x04port\"\x9a\x03\n" +
+	"\x04port\x18\x04 \x01(\rR\x04port\x12\x10\n" +
+	"\x03ttl\x18\x05 \x01(\rR\x03ttl\x12\x1c\n" +
+	"\taddresses\x18\x06 \x03(\tR\taddresses\x12%\n" +
+	"\x0eaddress_status\x18\a \x01(\tR\raddressStatus\"\x9a\x03\n" +
 	"\bJobEvent\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x10\n" +
 	"\x03seq\x18\x02 \x01(\x04R\x03seq\x12.\n" +

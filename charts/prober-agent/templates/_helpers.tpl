@@ -54,6 +54,13 @@ limits:
   max_cycles: {{ .Values.limits.maxCycles }}
   min_interval_ms: {{ .Values.limits.minIntervalMs }}
   max_ttl: {{ .Values.limits.maxTtl }}
+{{- with .Values.dns.nameservers }}
+dns:
+  nameservers:
+{{- range . }}
+    - {{ . | quote }}
+{{- end }}
+{{- end }}
 {{- end -}}
 
 {{- define "prober-agent.secretName" -}}

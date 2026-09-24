@@ -266,10 +266,16 @@ message DnsResult {
   // The owner name queried, e.g. "_sip._udp.example.com".
   string name = 2;
   repeated DnsRecord records = 3;
-  // Empty when the query was answered, even with no records (NXDOMAIN and
-  // NODATA are answers); otherwise why it failed (timeout, SERVFAIL, ...).
+  // Empty when a nameserver answered; otherwise why none did (timeout,
+  // unreachable, malformed reply).
   string error = 4;
   uint32 rtt_us = 5;
+  // The answer's response code by name (NOERROR, NXDOMAIN, SERVFAIL, REFUSED,
+  // ...), or NODATA for a NOERROR answer with no record of the asked type.
+  // Empty when no nameserver answered.
+  string status = 6;
+  // The nameserver that answered, as host:port.
+  string server = 7;
 }
 
 message DnsRecord {
@@ -279,6 +285,12 @@ message DnsRecord {
   uint32 priority = 2;
   uint32 weight = 3;
   uint32 port = 4;
+  uint32 ttl = 5;
+  // SRV only: the target's A and AAAA addresses, looked up alongside, so a
+  // target that does not resolve shows beside its record. When empty,
+  // address_status says why (NXDOMAIN, NODATA, SERVFAIL, TIMEOUT, ...).
+  repeated string addresses = 6;
+  string address_status = 7;
 }
 
 // JobEvent is anything an agent reports about a job. Every event carries the

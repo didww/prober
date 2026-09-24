@@ -67,6 +67,8 @@ func eventJSON(se *StreamEvent) ([]byte, string, []byte) {
 		out["record_type"] = r.Type
 		out["name"] = r.Name
 		out["records"] = dnsRecordsJSON(r.Records)
+		out["status"] = r.Status
+		out["server"] = r.Server
 		out["error"] = r.Error
 		out["rtt_us"] = r.RttUs
 	default:
@@ -108,15 +110,22 @@ func hopsJSON(hops []*pb.Hop) []map[string]any {
 }
 
 // dnsRecordsJSON is always an array, never null, so the client can index it
-// without a guard.
+// without a guard; the same goes for each record's addresses.
 func dnsRecordsJSON(recs []*pb.DnsRecord) []map[string]any {
 	out := make([]map[string]any, len(recs))
 	for i, r := range recs {
+		addrs := r.Addresses
+		if addrs == nil {
+			addrs = []string{}
+		}
 		out[i] = map[string]any{
-			"value":    r.Value,
-			"priority": r.Priority,
-			"weight":   r.Weight,
-			"port":     r.Port,
+			"value":          r.Value,
+			"priority":       r.Priority,
+			"weight":         r.Weight,
+			"port":           r.Port,
+			"ttl":            r.Ttl,
+			"addresses":      addrs,
+			"address_status": r.AddressStatus,
 		}
 	}
 	return out

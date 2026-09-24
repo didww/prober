@@ -258,3 +258,27 @@ func TestSkipHostnameVerify(t *testing.T) {
 		t.Fatal("skip_hostname_verify must still reject a cert that does not chain to the trusted CA")
 	}
 }
+
+func TestDNSConfigClient(t *testing.T) {
+	if c, err := (DNSConfig{}).client(); err != nil || c != nil {
+		t.Fatalf("empty: client=%v err=%v", c, err)
+	}
+	c, err := (DNSConfig{Nameservers: []string{"10.0.0.53", "[2001:db8::53]:5353", "192.0.2.1:53"}}).client()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"10.0.0.53:53", "[2001:db8::53]:5353", "192.0.2.1:53"}
+	if len(c.Nameservers) != len(want) {
+		t.Fatalf("got %v, want %v", c.Nameservers, want)
+	}
+	for i := range want {
+		if c.Nameservers[i] != want[i] {
+			t.Errorf("nameserver %d: got %q, want %q", i, c.Nameservers[i], want[i])
+		}
+	}
+	for _, bad := range []string{"", "ns.example.com", "10.0.0.53:x"} {
+		if _, err := (DNSConfig{Nameservers: []string{bad}}).client(); err == nil {
+			t.Errorf("%q: accepted", bad)
+		}
+	}
+}

@@ -50,6 +50,10 @@ func (a *API) Routes() http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RequestID)
+	// JSON compresses about tenfold; the monitor list is the one that
+	// matters, at hundreds of kilobytes for a large configuration. Event
+	// streams are not in the compressed types and pass through untouched.
+	r.Use(middleware.Compress(5))
 
 	// version and config are unauthenticated: the SPA shell asks who it is
 	// talking to (config.user) before it shows anything, and the version feeds
@@ -71,6 +75,9 @@ func (a *API) Routes() http.Handler {
 		r.Get("/probers", a.probers)
 		r.Get("/agents", a.agents)
 		r.Get("/monitors", a.listMonitors)
+		// Outside /monitors/{id} so no monitor id can shadow it.
+		r.Get("/monitors-status", a.monitorStatusStream)
+		r.Get("/monitors/{id}", a.monitorDetail)
 		r.Get("/monitors/{id}/reports", a.monitorReports)
 		r.Post("/runs", a.startRun)
 		r.Post("/sip-runs", a.startSipRun)
@@ -308,12 +315,6 @@ func (a *API) runEvents(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "no such run")
 		return
 	}
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		writeErr(w, http.StatusInternalServerError, "streaming unsupported")
-		return
-	}
-
 	var after uint64
 	if v := r.Header.Get("Last-Event-ID"); v != "" {
 		after, _ = strconv.ParseUint(v, 10, 64)
@@ -321,12 +322,10 @@ func (a *API) runEvents(w http.ResponseWriter, r *http.Request) {
 		after, _ = strconv.ParseUint(v, 10, 64)
 	}
 
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
-
+	flusher, ok := startSSE(w)
+	if !ok {
+		return
+	}
 	backlog, live, cancel := run.Subscribe(after)
 	defer cancel()
 
@@ -335,7 +334,7 @@ func (a *API) runEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	flusher.Flush()
 
-	ping := time.NewTicker(15 * time.Second)
+	ping := time.NewTicker(sseKeepalive)
 	defer ping.Stop()
 	ctx := r.Context()
 	for {
@@ -344,22 +343,58 @@ func (a *API) runEvents(w http.ResponseWriter, r *http.Request) {
 			return
 		case se, ok := <-live:
 			if !ok {
-				fmt.Fprintf(w, "event: done\ndata: {}\n\n")
+				writeSSEFrame(w, 0, "done", []byte("{}"))
 				flusher.Flush()
 				return
 			}
 			writeSSE(w, se)
 			flusher.Flush()
 		case <-ping.C:
-			fmt.Fprintf(w, ": keepalive\n\n")
-			flusher.Flush()
+			writeSSEComment(w, flusher)
 		}
 	}
 }
 
+// --- server-sent events ---------------------------------------------------------
+
+// sseKeepalive is how often an idle stream sends a comment, so proxies and
+// browsers see it alive.
+const sseKeepalive = 15 * time.Second
+
+// startSSE begins an event stream response: the headers that stop proxies
+// buffering it, then the status. It writes the error itself when the server
+// cannot stream.
+func startSSE(w http.ResponseWriter) (http.Flusher, bool) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeErr(w, http.StatusInternalServerError, "streaming unsupported")
+		return nil, false
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	return flusher, true
+}
+
+// writeSSEFrame writes one event. An id of 0 means none: the stream has no
+// replay and the browser should not send Last-Event-ID.
+func writeSSEFrame(w http.ResponseWriter, id uint64, name string, data []byte) {
+	if id != 0 {
+		fmt.Fprintf(w, "id: %d\n", id)
+	}
+	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", name, data)
+}
+
+func writeSSEComment(w http.ResponseWriter, flusher http.Flusher) {
+	fmt.Fprintf(w, ": keepalive\n\n")
+	flusher.Flush()
+}
+
 func writeSSE(w http.ResponseWriter, se *StreamEvent) {
 	data, typ, _ := eventJSON(se)
-	fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", se.Seq, typ, data)
+	writeSSEFrame(w, se.Seq, typ, data)
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

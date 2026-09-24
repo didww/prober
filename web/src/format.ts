@@ -66,12 +66,12 @@ export function mtrReport(s: SiteState): string {
   const src = s.source ? `${s.site} (${s.source})` : s.site
   const hostW = Math.max(20, src.length, ...names.map((n) => n.length))
 
-  const cols = (loss: string, snt: string, last: string, avg: string, best: string, wrst: string, dev: string) =>
-    rjust(loss, 6) + rjust(snt, 6) + rjust(last, 6) + rjust(avg, 6) + rjust(best, 6) + rjust(wrst, 6) + rjust(dev, 6)
+  const cols = (loss: string, snt: string, rcvd: string, last: string, avg: string, best: string, wrst: string, dev: string) =>
+    rjust(loss, 6) + rjust(snt, 6) + rjust(rcvd, 6) + rjust(last, 6) + rjust(avg, 6) + rjust(best, 6) + rjust(wrst, 6) + rjust(dev, 6)
 
   const lines: string[] = []
   lines.push(`Start: ${startStamp()}`)
-  lines.push(ljust('HOST: ' + src, 8 + hostW) + cols('Loss%', 'Snt', 'Last', 'Avg', 'Best', 'Wrst', 'StDev'))
+  lines.push(ljust('HOST: ' + src, 8 + hostW) + cols('Loss%', 'Snt', 'Rcvd', 'Last', 'Avg', 'Best', 'Wrst', 'StDev'))
 
   for (const h of s.hops) {
     const prefix = rjust(String(h.ttl), 3) + '.|-- '
@@ -81,6 +81,7 @@ export function mtrReport(s: SiteState): string {
         cols(
           `${h.loss_pct.toFixed(1)}%`,
           String(h.sent),
+          String(h.received),
           ms1(h.last_us),
           ms1(h.avg_us),
           ms1(h.best_us),

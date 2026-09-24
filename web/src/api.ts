@@ -86,15 +86,7 @@ export async function listAgents(): Promise<Agent[]> {
 }
 
 export async function startRun(req: StartRequest): Promise<{ id: string; sites: string[] }> {
-  const res = await check(
-    await fetch(apiURL('runs'), {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(req),
-      credentials: 'same-origin',
-    }),
-  )
-  return res.json()
+  return postJSON('runs', req)
 }
 
 export async function cancelRun(id: string): Promise<void> {
@@ -137,15 +129,43 @@ export type SipRunEvent =
   | { type: 'error'; seq: number; site: string; code: string; message: string }
 
 export async function startSipRun(req: SipStartRequest): Promise<{ id: string; sites: string[] }> {
-  const res = await check(
-    await fetch(apiURL('sip-runs'), {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(req),
-      credentials: 'same-origin',
-    }),
-  )
-  return res.json()
+  return postJSON('sip-runs', req)
+}
+
+// --- DNS lookup ---------------------------------------------------------------
+
+export interface DnsStartRequest {
+  name: string
+  sites: string[]
+  timeout_ms?: number
+}
+
+// One answer: the address for A and AAAA, the target host plus priority,
+// weight and port for SRV.
+export interface DnsRecord {
+  value: string
+  priority: number
+  weight: number
+  port: number
+}
+
+export type DnsRunEvent =
+  | { type: 'started'; seq: number; site: string; target: string; nameservers?: string[] }
+  | {
+      type: 'dns_result'
+      seq: number
+      site: string
+      record_type: string
+      name: string
+      records: DnsRecord[]
+      error: string
+      rtt_us: number
+    }
+  | { type: 'finished'; seq: number; site: string; reason: string }
+  | { type: 'error'; seq: number; site: string; code: string; message: string }
+
+export async function startDnsRun(req: DnsStartRequest): Promise<{ id: string; sites: string[] }> {
+  return postJSON('dns-runs', req)
 }
 
 // subscribe opens the run's SSE stream. The browser reconnects on its own and
@@ -188,6 +208,18 @@ export function subscribe<T>(
 
 async function getJSON<T>(path: string): Promise<T> {
   const res = await check(await fetch(apiURL(path), { credentials: 'same-origin' }))
+  return (await res.json()) as T
+}
+
+async function postJSON<T>(path: string, body: unknown): Promise<T> {
+  const res = await check(
+    await fetch(apiURL(path), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+      credentials: 'same-origin',
+    }),
+  )
   return (await res.json()) as T
 }
 

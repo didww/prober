@@ -33,6 +33,19 @@ export const TOOLS: Tool[] = [
            </svg>`,
   },
   {
+    // Resolve a name with each agent's own resolver: A, AAAA and the SIP SRVs.
+    id: 'dns',
+    title: 'DNS',
+    path: '/dns',
+    icon: `<svg viewBox="0 0 24 24" width="20" height="20" fill="none"
+             stroke="currentColor" stroke-width="1.8"
+             stroke-linecap="round" stroke-linejoin="round">
+             <circle cx="12" cy="12" r="8.5"/>
+             <path d="M3.5 12h17"/>
+             <path d="M12 3.5c2.6 2.4 3.9 5.2 3.9 8.5s-1.3 6.1-3.9 8.5c-2.6-2.4-3.9-5.2-3.9-8.5s1.3-6.1 3.9-8.5z"/>
+           </svg>`,
+  },
+  {
     id: 'agents',
     title: 'Agents',
     path: '/agents',

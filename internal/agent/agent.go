@@ -17,6 +17,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	pb "github.com/didww/prober/api/gen/prober/v1"
+	"github.com/didww/prober/internal/dns"
 	"github.com/didww/prober/internal/sip"
 	"github.com/didww/prober/internal/trace"
 )
@@ -327,6 +328,8 @@ func (a *Agent) startJob(ctx context.Context, job *pb.StartJob, send func(*pb.Ag
 		a.startTrace(ctx, job, send)
 	case *pb.StartJob_SipOptions:
 		a.startSip(ctx, job, send)
+	case *pb.StartJob_Dns:
+		a.startDns(ctx, job, send)
 	default:
 		a.sendError(send, job.JobId, pb.JobError_CODE_UNSPECIFIED, "no job spec")
 	}
@@ -401,6 +404,27 @@ func (a *Agent) startSip(ctx context.Context, job *pb.StartJob, send func(*pb.Ag
 		})
 		if err != nil {
 			a.sendError(send, job.JobId, pb.JobError_CODE_ENGINE, err.Error())
+		}
+	}()
+}
+
+// startDns runs a DNS lookup job against this host's resolver. There is no
+// target to resolve up front: the lookups are the job, and a bad name is
+// reported as a resolve error.
+func (a *Agent) startDns(ctx context.Context, job *pb.StartJob, send func(*pb.AgentMessage) error) {
+	spec := dnsSpecFromProto(job.GetDns())
+
+	jobCtx, cancel := context.WithCancel(ctx)
+	a.jobs.add(job.JobId, cancel)
+
+	go func() {
+		defer a.jobs.remove(job.JobId)
+		err := dns.Run(jobCtx, spec, nil, func(ev dns.Event) {
+			je := dnsEventToProto(job.JobId, a.seq.next(), ev)
+			_ = send(&pb.AgentMessage{Msg: &pb.AgentMessage_Event{Event: je}})
+		})
+		if err != nil {
+			a.sendError(send, job.JobId, pb.JobError_CODE_RESOLVE, err.Error())
 		}
 	}()
 }

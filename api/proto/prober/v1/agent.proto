@@ -99,6 +99,7 @@ message StartJob {
   oneof spec {
     TraceSpec trace = 10;
     SipOptionsSpec sip_options = 11;
+    DnsSpec dns = 12;
   }
 }
 
@@ -243,6 +244,43 @@ message SipResult {
   string tls_error = 10;
 }
 
+// --- DNS lookup ---------------------------------------------------------------
+
+// DnsSpec asks the agent to resolve a name with its host's own resolver: the
+// A and AAAA records, and the SIP service SRV records (_sip._udp, _sip._tcp,
+// _sip._tls and _sips._tcp). The point is to see what each site's resolver
+// answers, which differs under GeoDNS and split-horizon setups and is what
+// the trace and SIP probes at that site would use.
+message DnsSpec {
+  string name = 1;
+  // How long each query may take before it is reported as an error; 0 means
+  // the agent default.
+  uint32 timeout_ms = 2;
+}
+
+// DnsResult is one query's answer. One is sent per record type queried, as it
+// completes.
+message DnsResult {
+  // The record type queried: A, AAAA or SRV.
+  string type = 1;
+  // The owner name queried, e.g. "_sip._udp.example.com".
+  string name = 2;
+  repeated DnsRecord records = 3;
+  // Empty when the query was answered, even with no records (NXDOMAIN and
+  // NODATA are answers); otherwise why it failed (timeout, SERVFAIL, ...).
+  string error = 4;
+  uint32 rtt_us = 5;
+}
+
+message DnsRecord {
+  // The address for A and AAAA; the target host for SRV.
+  string value = 1;
+  // SRV only.
+  uint32 priority = 2;
+  uint32 weight = 3;
+  uint32 port = 4;
+}
+
 // JobEvent is anything an agent reports about a job. Every event carries the
 // agent's clock and a per-agent monotonic sequence, so the backend can store
 // or deduplicate events without state about the job.
@@ -256,6 +294,7 @@ message JobEvent {
     JobFinished finished = 12;
     JobError error = 13;
     SipResult sip_result = 14;
+    DnsResult dns_result = 15;
   }
 }
 
@@ -270,6 +309,9 @@ message JobStarted {
   AddressFamily family = 5;
   // For SIP: the transport used (udp/tcp/tls/wss). Empty for trace.
   string transport = 6;
+  // For DNS: the resolver addresses from the agent host's resolv.conf, so the
+  // answers can be read against who gave them. Empty otherwise.
+  repeated string nameservers = 7;
 }
 
 // Cycle is emitted once per cycle with every hop's sample and its running

@@ -16,6 +16,7 @@ import (
 
 	pb "github.com/didww/prober/api/gen/prober/v1"
 	"github.com/didww/prober/internal/auth"
+	"github.com/didww/prober/internal/vlog"
 )
 
 // API is the browser-facing HTTP surface: the prober list, starting and
@@ -28,10 +29,22 @@ type API struct {
 	log     *slog.Logger
 	version string
 	commit  string
+
+	// Monitoring, for the monitors page. Set via SetMonitoring; nil means
+	// the page lists nothing.
+	reg  *MonitorRegistry
+	sink *MonitorSink
+	vl   *vlog.Client
 }
 
 func NewAPI(gw *Gateway, mgr *Manager, a *auth.Auth, log *slog.Logger, version, commit string) *API {
 	return &API{gw: gw, mgr: mgr, auth: a, log: log, version: version, commit: commit}
+}
+
+// SetMonitoring wires the monitor registry, the sink holding each site's latest
+// outcome, and the VictoriaLogs client the trace history is read from.
+func (a *API) SetMonitoring(reg *MonitorRegistry, sink *MonitorSink, vl *vlog.Client) {
+	a.reg, a.sink, a.vl = reg, sink, vl
 }
 
 func (a *API) Routes() http.Handler {
@@ -58,6 +71,8 @@ func (a *API) Routes() http.Handler {
 		}
 		r.Get("/probers", a.probers)
 		r.Get("/agents", a.agents)
+		r.Get("/monitors", a.listMonitors)
+		r.Get("/monitors/{id}/reports", a.monitorReports)
 		r.Post("/runs", a.startRun)
 		r.Post("/sip-runs", a.startSipRun)
 		r.Post("/dns-runs", a.startDnsRun)

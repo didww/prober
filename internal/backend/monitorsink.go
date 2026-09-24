@@ -1,9 +1,11 @@
 package backend
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -33,8 +35,9 @@ var rttBuckets = []float64{0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5,
 var baseLabels = []string{"site", "monitor", "kind", "target", "transport"}
 
 // MonitorSink turns self-scheduled monitor events into Prometheus metrics and,
-// for trace/mtr, VictoriaLogs records. It is both an event handler
-// (OnMonitorEvent) and a prometheus.Collector (for the info metric).
+// for trace/mtr, one VictoriaLogs record per completed trace carrying the mtr
+// report. It is both an event handler (OnMonitorEvent) and a
+// prometheus.Collector (for the info metric).
 type MonitorSink struct {
 	reg *MonitorRegistry
 	vl  *vlog.Client
@@ -61,6 +64,60 @@ type monState struct {
 	source    string
 	protocol  string
 	labels    map[string]string
+
+	// The trace in progress, for the log record shipped when it ends: when it
+	// started and its latest cycle, whose hops carry the running aggregates
+	// over every cycle so far.
+	startedAt time.Time
+	lastCycle *pb.Cycle
+
+	// The newest outcome, for the monitors page. Zero until the first result.
+	last Outcome
+}
+
+// Outcome is one probe's result as the monitors page shows it: when it came,
+// what the target resolved to at the time, whether it counts as healthy, the
+// numbers behind that, and for SIP the response. A failed probe carries its
+// message in Error.
+type Outcome struct {
+	At        time.Time
+	Resolved  string
+	Source    string
+	Up        bool
+	LossPct   float64
+	RTTUs     uint32
+	HasRTT    bool
+	Reached   bool
+	Cycles    uint32
+	Hops      int
+	Code      int
+	Reason    string
+	Responded bool
+	Error     string
+}
+
+// MonitorStatus is a site's latest outcome for a monitor.
+type MonitorStatus struct {
+	Site string
+	Outcome
+}
+
+// AllStatuses returns every site's latest outcome, grouped by monitor id and
+// sorted by site, in one pass over the state.
+func (s *MonitorSink) AllStatuses() map[string][]MonitorStatus {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := map[string][]MonitorStatus{}
+	for k, st := range s.state {
+		if st.last.At.IsZero() {
+			continue
+		}
+		out[k.monitor] = append(out[k.monitor], MonitorStatus{Site: k.site, Outcome: st.last})
+	}
+	for _, list := range out {
+		slices.SortFunc(list, func(a, b MonitorStatus) int { return strings.Compare(a.Site, b.Site) })
+	}
+	return out
 }
 
 // NewMonitorSink builds the sink and registers its vector metrics on reg. The
@@ -169,20 +226,52 @@ func (s *MonitorSink) OnMonitorEvent(site string, ev *pb.JobEvent) {
 
 	switch e := ev.Event.(type) {
 	case *pb.JobEvent_Started:
-		s.onStarted(st, e.Started)
+		s.onStarted(st, ev, e.Started)
 	case *pb.JobEvent_Cycle:
-		s.onCycle(site, id, st, lv, e.Cycle)
+		s.onCycle(st, lv, e.Cycle)
 	case *pb.JobEvent_SipResult:
-		s.onSipResult(lv, e.SipResult)
+		s.onSipResult(st, lv, e.SipResult)
+	case *pb.JobEvent_Finished:
+		// A cancelled trace (reload, agent shutdown) is not a report: its
+		// aggregates cover part of a run, so it is dropped rather than
+		// shipped looking complete.
+		if e.Finished.Reason == pb.JobFinished_REASON_CANCELLED {
+			s.dropReport(st)
+		} else {
+			s.shipReport(site, id, st, "")
+		}
 	case *pb.JobEvent_Error:
 		// A failed probe (resolve/policy/engine): count it and mark down.
 		s.probesTotal.WithLabelValues(lv...).Inc()
 		s.up.WithLabelValues(lv...).Set(0)
+		s.mu.Lock()
+		st.last = Outcome{At: time.Now(), Resolved: st.resolved, Source: st.source, Error: e.Error.Message}
+		if st.kind != "sip" {
+			st.last.LossPct = 100
+		}
+		s.mu.Unlock()
+		// Only an engine error can follow cycles of the same run; the other
+		// codes fail before Started, so a buffered cycle would belong to an
+		// earlier run whose end never arrived. Report the former with the
+		// error attached, drop the latter.
+		if e.Error.Code == pb.JobError_CODE_ENGINE {
+			s.shipReport(site, id, st, e.Error.Message)
+		} else {
+			s.dropReport(st)
+		}
 	}
 }
 
-// onStarted records the resolved address, source, and protocol for later events.
-func (s *MonitorSink) onStarted(st *monState, started *pb.JobStarted) {
+// dropReport discards the buffered cycle of a trace that did not end cleanly.
+func (s *MonitorSink) dropReport(st *monState) {
+	s.mu.Lock()
+	st.lastCycle = nil
+	s.mu.Unlock()
+}
+
+// onStarted records the resolved address, source, and protocol for later
+// events, and opens a fresh trace for the log record.
+func (s *MonitorSink) onStarted(st *monState, ev *pb.JobEvent, started *pb.JobStarted) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	st.resolved = started.Resolved
@@ -190,13 +279,17 @@ func (s *MonitorSink) onStarted(st *monState, started *pb.JobStarted) {
 	if started.Protocol != pb.Protocol_PROTOCOL_UNSPECIFIED {
 		st.protocol = protoName(started.Protocol)
 	}
+	st.startedAt = time.Now()
+	if ev.Time != nil {
+		st.startedAt = ev.Time.AsTime()
+	}
+	st.lastCycle = nil
 }
 
-// onCycle updates RTT, loss, and up from a trace/ping cycle, and ships hop
-// detail to VictoriaLogs for trace monitors.
-func (s *MonitorSink) onCycle(site, id string, st *monState, lv []string, c *pb.Cycle) {
-	hop, matched := targetHop(c, st.resolvedLocked(s))
-	reached := matched && hop != nil && hop.Received > 0
+// onCycle updates RTT, loss, and up from a trace/ping cycle, and keeps the
+// cycle for the report a trace monitor ships when it finishes.
+func (s *MonitorSink) onCycle(st *monState, lv []string, c *pb.Cycle) {
+	hop, reached := destHop(c)
 	s.probesTotal.WithLabelValues(lv...).Inc()
 	if reached {
 		s.successTotal.WithLabelValues(lv...).Inc()
@@ -204,17 +297,27 @@ func (s *MonitorSink) onCycle(site, id string, st *monState, lv []string, c *pb.
 	}
 	s.up.WithLabelValues(lv...).Set(boolGauge(reached))
 	loss := 1.0
-	if matched && hop != nil {
+	if reached {
 		loss = hop.LossPct / 100
 	}
 	s.lossRatio.WithLabelValues(lv...).Set(loss)
-	if st.kind == "trace" {
-		s.shipCycle(site, id, st, c)
+
+	s.mu.Lock()
+	st.last = Outcome{
+		At: time.Now(), Resolved: st.resolved, Source: st.source,
+		Up: reached, LossPct: loss * 100, Reached: reached, Cycles: c.Number, Hops: len(c.Hops),
 	}
+	if reached {
+		st.last.RTTUs, st.last.HasRTT = hop.AvgUs, true
+	}
+	if st.kind == "trace" {
+		st.lastCycle = c
+	}
+	s.mu.Unlock()
 }
 
 // onSipResult updates the SIP counters, code label, up, and RTT for one probe.
-func (s *MonitorSink) onSipResult(lv []string, r *pb.SipResult) {
+func (s *MonitorSink) onSipResult(st *monState, lv []string, r *pb.SipResult) {
 	s.probesTotal.WithLabelValues(lv...).Inc()
 	code := "timeout"
 	success := false
@@ -231,6 +334,16 @@ func (s *MonitorSink) onSipResult(lv []string, r *pb.SipResult) {
 	if r.Responded && r.RttUs != nil {
 		s.rttSeconds.WithLabelValues(lv...).Observe(float64(*r.RttUs) / 1e6)
 	}
+
+	s.mu.Lock()
+	st.last = Outcome{
+		At: time.Now(), Resolved: st.resolved, Source: st.source,
+		Up: success, Code: int(r.StatusCode), Reason: r.Reason, Responded: r.Responded,
+	}
+	if r.Responded && r.RttUs != nil {
+		st.last.RTTUs, st.last.HasRTT = *r.RttUs, true
+	}
+	s.mu.Unlock()
 }
 
 // boolGauge maps a health boolean to a gauge value.
@@ -265,74 +378,74 @@ func (s *MonitorSink) stateFor(site, id string) *monState {
 	return st
 }
 
-func (st *monState) resolvedLocked(s *MonitorSink) string {
+// shipReport writes one VictoriaLogs record for the trace that just ended: the
+// full mtr report as the message, with the destination hop's aggregates as
+// fields so records can be filtered on loss or RTT. The last cycle's hops carry
+// the running totals over every cycle, which is what `mtr --report` prints.
+// Nothing is shipped for a trace that produced no cycle.
+func (s *MonitorSink) shipReport(site, id string, st *monState, errMsg string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	return st.resolved
-}
-
-// shipCycle writes one VictoriaLogs record per hop for a trace/mtr cycle.
-func (s *MonitorSink) shipCycle(site, id string, st *monState, c *pb.Cycle) {
-	if s.vl == nil || !s.vl.Enabled() {
+	c := st.lastCycle
+	st.lastCycle = nil
+	startedAt, resolved, source, protocol := st.startedAt, st.resolved, st.source, st.protocol
+	s.mu.Unlock()
+	if c == nil || s.vl == nil || !s.vl.Enabled() {
 		return
 	}
-	for _, h := range c.Hops {
-		ip, name, count := firstAddress(h)
-		rec := vlog.Record{
-			"_time":      vlog.Now(),
-			"_msg":       "mtr " + site + " -> " + st.target + " ttl=" + strconv.Itoa(int(h.Ttl)),
-			"site":       site,
-			"monitor":    id,
-			"target":     st.target,
-			"resolved":   st.resolved,
-			"source":     st.source,
-			"protocol":   st.protocol,
-			"cycle":      c.Number,
-			"hop_ttl":    h.Ttl,
-			"hop_host":   name,
-			"hop_addr":   ip,
-			"addr_count": count,
-			"sent":       h.Sent,
-			"received":   h.Received,
-			"loss_pct":   h.LossPct,
-			"best_ms":    usToMs(h.BestUs),
-			"avg_ms":     usToMs(h.AvgUs),
-			"worst_ms":   usToMs(h.WorstUs),
-			"stdev_ms":   usToMs(h.StdevUs),
-			"jitter_ms":  usToMs(h.JitterUs),
-		}
-		for k, v := range st.labels {
-			if _, taken := rec[k]; !taken {
-				rec[k] = v
-			}
-		}
-		s.vl.Write(rec)
+
+	hop, reached := destHop(c)
+	rec := vlog.Record{
+		"_time":    vlog.Now(),
+		"_msg":     mtrReport(site, source, startedAt, c.Hops),
+		"site":     site,
+		"monitor":  id,
+		"target":   st.target,
+		"resolved": resolved,
+		"source":   source,
+		"protocol": protocol,
+		"cycles":   c.Number,
+		"hops":     len(c.Hops),
+		"reached":  reached,
+		"loss_pct": 100.0,
 	}
+	if reached {
+		rec["sent"] = hop.Sent
+		rec["received"] = hop.Received
+		rec["loss_pct"] = hop.LossPct
+		rec["best_ms"] = usToMs(hop.BestUs)
+		rec["avg_ms"] = usToMs(hop.AvgUs)
+		rec["worst_ms"] = usToMs(hop.WorstUs)
+		rec["stdev_ms"] = usToMs(hop.StdevUs)
+		rec["jitter_ms"] = usToMs(hop.JitterUs)
+	}
+	if errMsg != "" {
+		rec["error"] = errMsg
+	}
+	for k, v := range st.labels {
+		if _, taken := rec[k]; !taken {
+			rec[k] = v
+		}
+	}
+	s.vl.Write(rec)
 }
 
 // --- helpers ----------------------------------------------------------------
 
-func targetHop(c *pb.Cycle, resolved string) (*pb.Hop, bool) {
-	var last *pb.Hop
-	for _, h := range c.Hops {
-		last = h
-		if resolved != "" {
-			for _, a := range h.Addresses {
-				if a.Ip == resolved {
-					return h, true
-				}
+// destHop is the hop a cycle's health is judged by: the one the target
+// answered at, per the engine's reached-at TTL, or the last hop probed while
+// the target has not answered. The flag is whether the target has.
+func destHop(c *pb.Cycle) (*pb.Hop, bool) {
+	if c.ReachedAt > 0 {
+		for _, h := range c.Hops {
+			if h.Ttl == c.ReachedAt {
+				return h, h.Received > 0
 			}
 		}
 	}
-	return last, false
-}
-
-func firstAddress(h *pb.Hop) (ip, name string, count uint32) {
-	if len(h.Addresses) == 0 {
-		return "", "", 0
+	if n := len(c.Hops); n > 0 {
+		return c.Hops[n-1], false
 	}
-	a := h.Addresses[0]
-	return a.Ip, a.Name, uint32(len(h.Addresses))
+	return nil, false
 }
 
 func usToMs(us uint32) float64 { return float64(us) / 1000 }

@@ -48,7 +48,7 @@ auth:
 # Predefined monitoring (stage 2). The backend pushes this list to each agent
 # as a versioned assignment on connect and on SIGHUP reload; the agent runs the
 # probes on its own schedule and reports back. Results become Prometheus metrics
-# (prober_monitor_*), and trace/mtr hop detail is written to VictoriaLogs.
+# (prober_monitor_*), and each completed trace/mtr is written to VictoriaLogs.
 #
 # kind: trace (mtr) | ping (single-hop RTT) | sip (SIP OPTIONS)
 # sites: optional; empty means every connected agent runs it.
@@ -73,8 +73,9 @@ monitors: []
 #     interval_s: 15
 #     trace: { protocol: icmp, family: ipv4, cycles: 3 }
 
-# VictoriaLogs: where trace/mtr hop detail is shipped (one record per hop per
-# cycle). Empty url disables shipping; metrics still work.
+# VictoriaLogs: where trace/mtr results are shipped, one record per completed
+# trace with the full mtr report in _msg and the destination hop's loss and RTT
+# as fields. Empty url disables shipping; metrics still work.
 victorialogs:
   url: ""                       # e.g. http://victorialogs:9428 (base, no /insert path)
   # username: ""

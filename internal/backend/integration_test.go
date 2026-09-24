@@ -139,11 +139,14 @@ func TestMonitoringEndToEnd(t *testing.T) {
 		t.Fatalf("ping monitor never reported up=1.\nmetrics:\n%s", scrape())
 	}
 
-	// The trace monitor should ship at least one hop record to VictoriaLogs.
+	// The trace monitor should ship its report to VictoriaLogs once the trace
+	// completes: one record, the mtr text in _msg, loopback reached.
 	if !waitForRecord(10*time.Second, vlRecs, func(m map[string]any) bool {
-		return m["monitor"] == "mtr-lo" && m["site"] == "testsite" && m["hop_addr"] == "127.0.0.1"
+		msg, _ := m["_msg"].(string)
+		return m["monitor"] == "mtr-lo" && m["site"] == "testsite" && m["reached"] == true &&
+			strings.HasPrefix(msg, "Start: ") && strings.Contains(msg, "HOST: testsite") && strings.Contains(msg, "1.|-- 127.0.0.1")
 	}) {
-		t.Fatal("no VictoriaLogs hop record for the trace monitor")
+		t.Fatal("no VictoriaLogs report record for the trace monitor")
 	}
 
 	// Reload: add a second ping monitor, re-push, and confirm it starts too.

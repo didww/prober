@@ -43,6 +43,22 @@ export function clockTime(ms: number): string {
   })
 }
 
+// A full date and time from an ISO timestamp, in the operator's locale and
+// chosen 12/24h format.
+export function dateTime(iso: string): string {
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return iso || '—'
+  return d.toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: hour12.value,
+  })
+}
+
 // A compact human duration from an ISO timestamp to now: "3d 4h", "12m", "45s".
 export function since(iso: string, now = Date.now()): string {
   if (!iso) return '—'

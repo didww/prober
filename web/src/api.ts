@@ -168,6 +168,97 @@ export async function startDnsRun(req: DnsStartRequest): Promise<{ id: string; s
   return postJSON('dns-runs', req)
 }
 
+// --- Monitors ------------------------------------------------------------------
+
+export interface MonitorTraceParams {
+  protocol: string
+  family: string
+  port: number
+  cycles: number
+  interval_ms: number
+  first_ttl: number
+  max_ttl: number
+  resolve_names: boolean
+}
+
+export interface MonitorSipParams {
+  transport: string
+  family: string
+  port: number
+  cycles: number
+  interval_ms: number
+  timeout_ms: number
+}
+
+// One site's latest outcome for a monitor. up is null and at empty until the
+// site has reported a result.
+export interface MonitorSiteStatus {
+  site: string
+  connected: boolean
+  at: string
+  up: boolean | null
+  resolved: string
+  source: string
+  loss_pct: number
+  rtt_ms: number | null
+  reached: boolean
+  cycles: number
+  hops: number
+  code: number
+  reason: string
+  responded: boolean
+  error: string
+}
+
+export interface Monitor {
+  id: string
+  kind: 'trace' | 'ping' | 'sip'
+  target: string
+  interval_s: number
+  sites: string[]
+  labels: Record<string, string>
+  trace?: MonitorTraceParams
+  sip?: MonitorSipParams
+  // Whether reports can be fetched: a trace monitor with VictoriaLogs on.
+  history: boolean
+  status: MonitorSiteStatus[]
+}
+
+// One shipped trace: the summary for its row and the mtr text.
+export interface TraceReport {
+  time: string
+  site: string
+  target: string
+  resolved: string
+  source: string
+  reached: boolean
+  loss_pct: number
+  avg_ms: number | null
+  cycles: number
+  hops: number
+  error: string
+  report: string
+}
+
+export type ReportRange = '1h' | '6h' | '24h' | '7d' | '30d'
+export const REPORT_RANGES: ReportRange[] = ['1h', '6h', '24h', '7d', '30d']
+
+export async function listMonitors(): Promise<Monitor[]> {
+  return (await getJSON<Monitor[] | null>('monitors')) ?? []
+}
+
+export async function listTraceReports(
+  id: string,
+  opts: { site?: string; range?: ReportRange; limit?: number } = {},
+): Promise<TraceReport[]> {
+  const q = new URLSearchParams()
+  if (opts.site) q.set('site', opts.site)
+  if (opts.range) q.set('range', opts.range)
+  if (opts.limit) q.set('limit', String(opts.limit))
+  const qs = q.toString()
+  return (await getJSON<TraceReport[] | null>(`monitors/${encodeURIComponent(id)}/reports${qs ? '?' + qs : ''}`)) ?? []
+}
+
 // subscribe opens the run's SSE stream. The browser reconnects on its own and
 // sends Last-Event-ID, so the backend replays what was missed.
 // subscribe opens a run's SSE stream, registering listeners for the given

@@ -8,6 +8,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -78,6 +80,79 @@ func New(opt Options, log *slog.Logger) *Client {
 
 // Enabled reports whether shipping is configured.
 func (c *Client) Enabled() bool { return c.base != "" }
+
+// StreamFields is the field set records are keyed by on ingestion, so a query
+// can use the (fast) stream filter for those fields.
+func (c *Client) StreamFields() []string { return c.opt.StreamFields }
+
+// ErrDisabled is returned by Query when no VictoriaLogs URL is configured.
+var ErrDisabled = errors.New("victorialogs: not configured")
+
+// Query runs a LogsQL query (POST /select/logsql/query) and returns the
+// matching records in the order VictoriaLogs emits them, which is the order the
+// query's sort pipe asks for. Every field value is a string, as VictoriaLogs
+// returns them; the caller converts what it needs.
+func (c *Client) Query(ctx context.Context, query string) ([]map[string]string, error) {
+	if !c.Enabled() {
+		return nil, ErrDisabled
+	}
+	form := url.Values{"query": {query}}
+	reqCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, c.base+"/select/logsql/query", strings.NewReader(form.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	c.applyAuth(req)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("victorialogs: query: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return nil, fmt.Errorf("victorialogs: query: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(msg)))
+	}
+
+	// The body is a stream of JSON objects, one per line; a Decoder reads
+	// them back to back.
+	out := []map[string]string{}
+	dec := json.NewDecoder(resp.Body)
+	for {
+		var raw map[string]any
+		if err := dec.Decode(&raw); err != nil {
+			if errors.Is(err, io.EOF) {
+				return out, nil
+			}
+			return nil, fmt.Errorf("victorialogs: query: decode: %w", err)
+		}
+		rec := make(map[string]string, len(raw))
+		for k, v := range raw {
+			rec[k] = stringValue(v)
+		}
+		out = append(out, rec)
+	}
+}
+
+// stringValue flattens a decoded JSON value to the string VictoriaLogs would
+// have sent for it, in case a value arrives typed.
+func stringValue(v any) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case nil:
+		return ""
+	case float64:
+		return strconv.FormatFloat(x, 'f', -1, 64)
+	case bool:
+		return strconv.FormatBool(x)
+	default:
+		b, _ := json.Marshal(x)
+		return string(b)
+	}
+}
 
 // Write enqueues a record. It never blocks: if the queue is full the record is
 // dropped and counted, so a slow or down VictoriaLogs cannot stall probing.

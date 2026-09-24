@@ -57,17 +57,22 @@ async function load() {
   }
   loading = true
   clearTimeout(retry)
+  let ok = false
   try {
     const l = await listMonitors()
     monitors.value = l.monitors
     version.value = l.version
     // The stream is the authority on state once its snapshot has arrived;
-    // the list's copy can be older than what it has delivered since.
-    if (!haveSnapshot) for (const m of l.monitors) states[m.id] = m.state
+    // the list's copy can be older than what it has delivered since. A
+    // monitor no longer listed loses its state and its expanded row, so a
+    // re-added id starts clean.
     const ids = new Set(l.monitors.map((m) => m.id))
+    if (!haveSnapshot) for (const m of l.monitors) states[m.id] = m.state
+    for (const id of Object.keys(states)) if (!ids.has(id)) delete states[id]
     for (const id of Object.keys(details)) if (!ids.has(id)) delete details[id]
     loadError.value = ''
     retryDelay = 5000
+    ok = true
   } catch (e) {
     loadError.value = String(e)
     retry = window.setTimeout(() => void load(), retryDelay)
@@ -76,7 +81,9 @@ async function load() {
     loaded.value = true
     loading = false
   }
-  if (reloadPending || (streamVersion && streamVersion !== version.value)) {
+  // Only a fetch that succeeded is worth repeating for a newer version; a
+  // failed one is already scheduled to retry with backoff.
+  if (ok && (reloadPending || (streamVersion && streamVersion !== version.value))) {
     reloadPending = false
     void load()
   }
@@ -90,8 +97,14 @@ async function loadProbers() {
   }
 }
 
+// The browser retries a dropped stream on its own, but gives up for good
+// on a non-stream answer such as a proxy's error page during a backend
+// restart; that case is reopened here after a pause.
 let es: EventSource | null = null
+let reconnect = 0
 function connect() {
+  clearTimeout(reconnect)
+  es?.close()
   es = subscribeMonitorStatus(
     (ev) => {
       switch (ev.type) {
@@ -122,6 +135,7 @@ function connect() {
     },
     () => {
       live.value = false
+      if (es?.readyState === EventSource.CLOSED) reconnect = window.setTimeout(connect, 5000)
     },
   )
 }
@@ -343,7 +357,9 @@ onBeforeUnmount(() => {
   clearInterval(probers)
   clearInterval(tick)
   clearTimeout(retry)
+  clearTimeout(reconnect)
   es?.close()
+  es = null
 })
 </script>
 
@@ -557,10 +573,13 @@ h1 { font-size: 16px; margin: 0; }
 .id { font-weight: 600; white-space: nowrap; }
 .caret { display: inline-block; margin-right: 6px; font-size: 9px; color: var(--fg-dim); transition: transform 0.1s; }
 .caret.open { transform: rotate(90deg); }
-.kind { padding: 1px 7px; border-radius: 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: #fff; background: var(--fg-dim); }
+/* Solid badges take the cell palette, which is made for light text on it in
+   both themes; the semantic text colours are tuned for text on the panel and
+   go too bright in dark mode. */
+.kind { padding: 1px 7px; border-radius: 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--cell-fg); background: var(--fg-dim); }
 .kind.trace { background: var(--accent-solid, var(--accent)); }
-.kind.ping { background: var(--ok); }
-.kind.sip { background: var(--warn); }
+.kind.ping { background: var(--cell-good); }
+.kind.sip { background: var(--cell-warn); }
 .labels { display: flex; flex-wrap: wrap; gap: 4px; }
 .label { padding: 1px 7px; border: 1px solid var(--line); border-radius: 999px; font-size: 11px; color: var(--fg-dim); white-space: nowrap; }
 .label b { color: var(--fg); font-weight: 500; }

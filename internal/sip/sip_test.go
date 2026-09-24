@@ -19,6 +19,10 @@ import (
 // counter of received OPTIONS.
 func startServer(t *testing.T, network string, code int, reason string) (netip.AddrPort, *atomic.Int64) {
 	t.Helper()
+	// The engine sets sipgo's global timers once, on its first run. Do it
+	// before the server's goroutines exist, so their reads of those timers
+	// are ordered after the write for the race detector too.
+	suppressRetransmit()
 	ua, err := sipgo.NewUA(sipgo.WithUserAgent("test-srv"))
 	if err != nil {
 		t.Fatal(err)

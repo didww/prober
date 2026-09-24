@@ -110,6 +110,40 @@ func TestSinkSipMetrics(t *testing.T) {
 	if v := testutil.ToFloat64(s.sipResponses.WithLabelValues(code...)); v != 1 {
 		t.Errorf("sip_responses{code=200} = %v, want 1", v)
 	}
+
+	// Any final response is reachability: a 403 keeps the monitor up and
+	// counts as success, while its code is still counted on its own.
+	s.OnMonitorEvent("ams", &pb.JobEvent{JobId: "mon:s1", Event: &pb.JobEvent_SipResult{
+		SipResult: &pb.SipResult{Cycle: 2, StatusCode: 403, Reason: "Forbidden", Responded: true, RttUs: &rtt},
+	}})
+	if v := testutil.ToFloat64(s.successTotal.WithLabelValues(lv...)); v != 2 {
+		t.Errorf("success_total after 403 = %v, want 2", v)
+	}
+	if v := testutil.ToFloat64(s.up.WithLabelValues(lv...)); v != 1 {
+		t.Errorf("up after 403 = %v, want 1", v)
+	}
+	code403 := append(append([]string{}, lv...), "403")
+	if v := testutil.ToFloat64(s.sipResponses.WithLabelValues(code403...)); v != 1 {
+		t.Errorf("sip_responses{code=403} = %v, want 1", v)
+	}
+	if st := s.Statuses("s1"); len(st) != 1 || !st[0].Up || st[0].Code != 403 {
+		t.Errorf("status after 403: %+v", st)
+	}
+
+	// No response at all is the only failure.
+	s.OnMonitorEvent("ams", &pb.JobEvent{JobId: "mon:s1", Event: &pb.JobEvent_SipResult{
+		SipResult: &pb.SipResult{Cycle: 3, Responded: false},
+	}})
+	if v := testutil.ToFloat64(s.up.WithLabelValues(lv...)); v != 0 {
+		t.Errorf("up after timeout = %v, want 0", v)
+	}
+	if v := testutil.ToFloat64(s.successTotal.WithLabelValues(lv...)); v != 2 {
+		t.Errorf("success_total after timeout = %v, want 2", v)
+	}
+	timeout := append(append([]string{}, lv...), "timeout")
+	if v := testutil.ToFloat64(s.sipResponses.WithLabelValues(timeout...)); v != 1 {
+		t.Errorf("sip_responses{code=timeout} = %v, want 1", v)
+	}
 }
 
 func TestSinkInfoMetricCarriesLabels(t *testing.T) {
@@ -379,14 +413,19 @@ func TestSinkAggregateAndStream(t *testing.T) {
 		t.Fatalf("statuses: %+v", st)
 	}
 
-	// A reload that narrows t1 to fra and slows it: ams is dropped, and
-	// fra's staleness follows the new interval, so the sweep that found it
-	// stale before now finds it current.
+	// A reload that narrows t1 to fra and slows it: ams is dropped and the
+	// aggregate recomputed at once, by the clock, where fra reported seconds
+	// ago: UP at one site. Then the reload is announced. Staleness follows
+	// the new interval, so the sweep that found fra stale before now finds
+	// nothing to change.
 	s.reg.Replace([]MonitorConfig{
 		{ID: "t1", Kind: "ping", Target: "1.2.3.4", IntervalS: 600, Sites: []string{"fra"}},
 		{ID: "t2", Kind: "ping", Target: "5.6.7.8", IntervalS: 10},
 	})
 	s.Retain()
+	if ev = next(); ev.Changes == nil || ev.Changes["t1"].State != StateUp || ev.Changes["t1"].Sites != 1 || ev.Changes["t1"].Stale != 0 {
+		t.Fatalf("recomputed on reload: %+v", ev)
+	}
 	if ev = next(); ev.ID != "" || ev.Changes != nil || ev.Version != 2 {
 		t.Fatalf("reload event: %+v", ev)
 	}
@@ -394,12 +433,13 @@ func TestSinkAggregateAndStream(t *testing.T) {
 		t.Fatalf("statuses after narrowing: %+v", st)
 	}
 	s.Sweep(time.Now().Add(2 * time.Minute))
-	if ev = next(); ev.Changes["t1"].State != StateUp || ev.Changes["t1"].Stale != 0 {
-		t.Fatalf("after reload with a longer interval: %+v", ev)
-	}
+	none()
 
-	// A site silent for longer than forgetAfter is dropped altogether: no
-	// retired agent pins a monitor.
+	// A site silent for longer than its forget window is dropped altogether,
+	// metric series included: no retired agent pins a monitor. The window
+	// scales with the interval: at ten minutes it is two stale periods, an
+	// hour, so an hour and a minute is enough.
+	before := testutil.CollectAndCount(s.up)
 	s.Sweep(time.Now().Add(forgetAfter + time.Minute))
 	if ev = next(); ev.Changes["t1"].State != StateNoData || ev.Changes["t1"].Sites != 0 {
 		t.Fatalf("after forgetting: %+v", ev)
@@ -407,12 +447,34 @@ func TestSinkAggregateAndStream(t *testing.T) {
 	if st := s.Statuses("t1"); len(st) != 0 {
 		t.Fatalf("statuses after forgetting: %+v", st)
 	}
+	if after := testutil.CollectAndCount(s.up); after != before-1 {
+		t.Fatalf("up series after forgetting: %d, want %d", after, before-1)
+	}
+	// A result arriving afterwards registers the site again.
+	cycle("t1", "fra", true)
+	if ev = next(); ev.Aggregate.State != StateUp || ev.Aggregate.Sites != 1 {
+		t.Fatalf("after re-registering: %+v", ev)
+	}
+
+	// A reload that moves t1 to a site with no data recomputes it to NO
+	// DATA rather than leaving the old aggregate in place.
+	s.reg.Replace([]MonitorConfig{
+		{ID: "t1", Kind: "ping", Target: "1.2.3.4", IntervalS: 600, Sites: []string{"nyc"}},
+		{ID: "t2", Kind: "ping", Target: "5.6.7.8", IntervalS: 10},
+	})
+	s.Retain()
+	if ev = next(); ev.Changes["t1"].State != StateNoData || ev.Changes["t1"].Sites != 0 {
+		t.Fatalf("moved to a silent site: %+v", ev)
+	}
+	if ev = next(); ev.Version != 3 {
+		t.Fatalf("reload event: %+v", ev)
+	}
 
 	// A removed monitor loses its aggregate on reload.
 	s.reg.Replace([]MonitorConfig{{ID: "t2", Kind: "ping", Target: "5.6.7.8", IntervalS: 10}})
 	s.Retain()
-	if ev = next(); ev.Version != 3 {
-		t.Fatalf("second reload: %+v", ev)
+	if ev = next(); ev.Version != 4 {
+		t.Fatalf("third reload: %+v", ev)
 	}
 	if _, has := s.Aggregate("t1"); has {
 		t.Fatal("removed monitor still has an aggregate")
@@ -436,8 +498,31 @@ func TestSinkAggregateAndStream(t *testing.T) {
 	}
 	snapshot, version, _, cancel2 := s.Subscribe()
 	defer cancel2()
-	if version != 3 || snapshot["t2"].State != StateUp {
+	if version != 4 || snapshot["t2"].State != StateUp {
 		t.Fatalf("fresh snapshot: version=%d %v", version, snapshot)
+	}
+}
+
+func TestSinkSlowMonitorIsNotForgottenBetweenRuns(t *testing.T) {
+	s := newTestSink(t, []MonitorConfig{
+		{ID: "slow", Kind: "trace", Target: "1.2.3.4", IntervalS: 3600},
+	}, nil)
+	s.OnMonitorEvent("fra", &pb.JobEvent{JobId: "mon:slow", Event: &pb.JobEvent_Cycle{
+		Cycle: &pb.Cycle{Number: 1, ReachedAt: 1, Hops: []*pb.Hop{{Ttl: 1, Sent: 1, Received: 1}}},
+	}})
+	// Two hours on: not yet stale (three intervals) and, since the forget
+	// window is two stale periods, nowhere near forgotten.
+	s.Sweep(time.Now().Add(2 * time.Hour))
+	if st := s.Statuses("slow"); len(st) != 1 || st[0].Stale {
+		t.Fatalf("after two hours: %+v", st)
+	}
+	if a, _ := s.Aggregate("slow"); a.State != StateUp {
+		t.Fatalf("aggregate after two hours: %+v", a)
+	}
+	// Seven hours on it is gone.
+	s.Sweep(time.Now().Add(7 * time.Hour))
+	if st := s.Statuses("slow"); len(st) != 0 {
+		t.Fatalf("after seven hours: %+v", st)
 	}
 }
 

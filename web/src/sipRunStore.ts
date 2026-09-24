@@ -26,6 +26,9 @@ export interface SiteState {
   // Per-cycle outcomes for the timeline strip.
   timeline: { rtt: number | null; code: number }[]
   sent: number
+  // Cycles that got any final response: an OPTIONS probe measures
+  // reachability, so a 403 counts as much as a 200, and only a timeout is
+  // loss.
   ok: number
   error: string
   expanded: boolean
@@ -102,7 +105,7 @@ export function createSipRun(): {
         s.tlsError = ev.tls_error
         s.request = ev.request
         s.response = ev.response
-        if (ev.responded && ev.status_code >= 200 && ev.status_code < 300) s.ok++
+        if (ev.responded) s.ok++
         s.timeline.push({ rtt: ev.rtt_us, code: ev.status_code })
         if (s.timeline.length > TIMELINE_MAX) s.timeline.splice(0, s.timeline.length - TIMELINE_MAX)
         break

@@ -163,11 +163,17 @@ const (
 	// marks the moment a site's outcome goes stale.
 	sweepInterval = 10 * time.Second
 	// forgetAfter is how long a stale site is kept before it is dropped from
-	// its monitors. An agent silent this long is retired or in real trouble,
-	// and either way its last result should stop shaping the state; the
-	// Agents page is where its absence shows.
+	// its monitors, at least. An agent silent this long is retired or in
+	// real trouble, and either way its last result should stop shaping the
+	// state; the Agents page is where its absence shows.
 	forgetAfter = time.Hour
 )
+
+// forgetAfterFor scales the forget window with the monitor's interval, so a
+// monitor that runs every hour or two is not wiped between its own runs.
+func forgetAfterFor(intervalS uint32) time.Duration {
+	return max(forgetAfter, 2*staleAfter(intervalS))
+}
 
 func (s *MonitorSink) aggregateLocked(id string, now time.Time) Aggregate {
 	var a Aggregate
@@ -214,40 +220,84 @@ func (s *MonitorSink) refreshLocked(id string, now time.Time) (Aggregate, bool) 
 }
 
 // refresh re-evaluates one monitor after an outcome landed and publishes the
-// aggregate if it changed.
+// aggregate if it changed. Publishing happens under the lock, as everywhere,
+// so subscribers see aggregates in the order they were computed.
 func (s *MonitorSink) refresh(id string, now time.Time) {
 	s.mu.Lock()
-	a, changed := s.refreshLocked(id, now)
-	s.mu.Unlock()
-	if changed {
-		s.publish(StatusEvent{ID: id, Aggregate: a})
+	defer s.mu.Unlock()
+	if a, changed := s.refreshLocked(id, now); changed {
+		s.publishLocked(StatusEvent{ID: id, Aggregate: a})
 	}
 }
 
-// Sweep drops sites silent for longer than forgetAfter, re-evaluates every
-// monitor for staleness, and publishes what changed as one batch, so a mass
-// change (an agent dropping) is one message, not one per monitor. Run calls
-// it periodically; tests call it with a chosen time.
+// keepLocked makes sure st is the registered state for its site, putting it
+// back if a sweep or reload removed the entry while a handler held it, so the
+// outcome it is about to record is not written into an orphan.
+func (s *MonitorSink) keepLocked(site, id string, st *monState) {
+	k := monKey{site: site, monitor: id}
+	if s.state[k] == st {
+		return
+	}
+	s.state[k] = st
+	if s.byMonitor[id] == nil {
+		s.byMonitor[id] = map[string]*monState{}
+	}
+	s.byMonitor[id][site] = st
+}
+
+// forgetLocked drops one site's state for a monitor, with the metric series
+// it produced, so nothing of a gone site lingers in the exposition.
+func (s *MonitorSink) forgetLocked(k monKey) {
+	p := prometheus.Labels{"site": k.site, "monitor": k.monitor}
+	s.probesTotal.DeletePartialMatch(p)
+	s.successTotal.DeletePartialMatch(p)
+	s.rttSeconds.DeletePartialMatch(p)
+	s.lossRatio.DeletePartialMatch(p)
+	s.up.DeletePartialMatch(p)
+	s.sipResponses.DeletePartialMatch(p)
+	delete(s.state, k)
+	if sites := s.byMonitor[k.monitor]; sites != nil {
+		delete(sites, k.site)
+		if len(sites) == 0 {
+			delete(s.byMonitor, k.monitor)
+		}
+	}
+}
+
+// monitorIDsLocked is every monitor with state or an aggregate: both need
+// re-evaluating, since a monitor can hold an aggregate after its last site
+// was dropped.
+func (s *MonitorSink) monitorIDsLocked() map[string]struct{} {
+	ids := make(map[string]struct{}, len(s.agg)+len(s.byMonitor))
+	for id := range s.byMonitor {
+		ids[id] = struct{}{}
+	}
+	for id := range s.agg {
+		ids[id] = struct{}{}
+	}
+	return ids
+}
+
+// Sweep drops sites silent for longer than their forget window, re-evaluates
+// every monitor for staleness, and publishes what changed as one batch, so a
+// mass change (an agent dropping) is one message, not one per monitor. Run
+// calls it periodically; tests call it with a chosen time.
 func (s *MonitorSink) Sweep(now time.Time) {
 	s.mu.Lock()
-	changed := map[string]Aggregate{}
-	for id, sites := range s.byMonitor {
-		for site, st := range sites {
-			if !st.last.At.IsZero() && now.Sub(st.last.At) > forgetAfter {
-				delete(sites, site)
-				delete(s.state, monKey{site: site, monitor: id})
-			}
+	defer s.mu.Unlock()
+	for k, st := range s.state {
+		if !st.last.At.IsZero() && now.Sub(st.last.At) > forgetAfterFor(st.intervalS) {
+			s.forgetLocked(k)
 		}
+	}
+	changed := map[string]Aggregate{}
+	for id := range s.monitorIDsLocked() {
 		if a, ok := s.refreshLocked(id, now); ok {
 			changed[id] = a
 		}
-		if len(sites) == 0 {
-			delete(s.byMonitor, id)
-		}
 	}
-	s.mu.Unlock()
 	if len(changed) > 0 {
-		s.publish(StatusEvent{Changes: changed})
+		s.publishLocked(StatusEvent{Changes: changed})
 	}
 }
 
@@ -336,6 +386,11 @@ func (sub *statusSub) close() {
 // version, then a channel of changes. The channel is closed when the
 // subscriber falls too far behind, at which point it should subscribe again
 // rather than trust what it has. cancel ends the subscription.
+//
+// The snapshot is taken and the subscriber registered under the one lock
+// every publish holds, so no change can fall between them. The version is
+// read after registering: a reload before that point is reflected in it, and
+// one after it reaches the subscriber as an event.
 func (s *MonitorSink) Subscribe() (snapshot map[string]Aggregate, version uint64, changes <-chan StatusEvent, cancel func()) {
 	sub := &statusSub{ch: make(chan StatusEvent, 1024)}
 	s.mu.Lock()
@@ -353,20 +408,21 @@ func (s *MonitorSink) Subscribe() (snapshot map[string]Aggregate, version uint64
 	}
 }
 
-func (s *MonitorSink) publish(ev StatusEvent) {
-	s.mu.Lock()
-	subs := make([]*statusSub, 0, len(s.subs))
+// publishLocked delivers an event to every subscriber, under s.mu so events
+// go out in the order their aggregates were computed. Sends never block; a
+// subscriber that cannot keep up is dropped.
+func (s *MonitorSink) publishLocked(ev StatusEvent) {
 	for sub := range s.subs {
-		subs = append(subs, sub)
-	}
-	s.mu.Unlock()
-	for _, sub := range subs {
 		if !sub.send(ev) {
-			s.mu.Lock()
 			delete(s.subs, sub)
-			s.mu.Unlock()
 		}
 	}
+}
+
+func (s *MonitorSink) publish(ev StatusEvent) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.publishLocked(ev)
 }
 
 // NewMonitorSink builds the sink and registers its vector metrics on reg. The
@@ -385,7 +441,7 @@ func NewMonitorSink(reg *MonitorRegistry, vl *vlog.Client, promReg prometheus.Re
 		}, baseLabels),
 		successTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "prober_monitor_probes_success_total",
-			Help: "Monitor probes that reached the target (trace/ping) or got a 2xx (sip).",
+			Help: "Monitor probes that reached the target (trace/ping) or got any final response (sip).",
 		}, baseLabels),
 		rttSeconds: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "prober_monitor_rtt_seconds",
@@ -450,40 +506,38 @@ func (s *MonitorSink) Collect(ch chan<- prometheus.Metric) {
 // Retain reconciles the state with a reloaded configuration: monitors no
 // longer configured, and sites a monitor no longer runs at, lose their metric
 // series, state and aggregate; surviving state picks up the new interval its
-// staleness is judged by. It then tells the status stream to fetch the new
-// list.
+// staleness is judged by; every surviving monitor's aggregate is recomputed,
+// since dropping a site changes it. It publishes those changes, then tells
+// the status stream to fetch the new list.
 func (s *MonitorSink) Retain() {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	for k, st := range s.state {
 		mc, ok := s.reg.lookup(k.monitor)
 		if ok && siteMatches(mc.Sites, k.site) {
 			st.intervalS = mc.IntervalS
 			continue
 		}
-		p := prometheus.Labels{"site": k.site, "monitor": k.monitor}
-		s.probesTotal.DeletePartialMatch(p)
-		s.successTotal.DeletePartialMatch(p)
-		s.rttSeconds.DeletePartialMatch(p)
-		s.lossRatio.DeletePartialMatch(p)
-		s.up.DeletePartialMatch(p)
-		s.sipResponses.DeletePartialMatch(p)
-		delete(s.state, k)
-		if sites := s.byMonitor[k.monitor]; sites != nil {
-			delete(sites, k.site)
-			if len(sites) == 0 {
-				delete(s.byMonitor, k.monitor)
-			}
-		}
+		s.forgetLocked(k)
 	}
 	// Aggregates are pruned by the registry, not through state entries: a
-	// monitor whose sites were all forgotten has none left to walk.
+	// monitor whose sites were all dropped has none left to walk.
 	for id := range s.agg {
 		if _, ok := s.reg.lookup(id); !ok {
 			delete(s.agg, id)
 		}
 	}
-	s.mu.Unlock()
-	s.publish(StatusEvent{Version: s.reg.Version()})
+	now := time.Now()
+	changed := map[string]Aggregate{}
+	for id := range s.monitorIDsLocked() {
+		if a, ok := s.refreshLocked(id, now); ok {
+			changed[id] = a
+		}
+	}
+	if len(changed) > 0 {
+		s.publishLocked(StatusEvent{Changes: changed})
+	}
+	s.publishLocked(StatusEvent{Version: s.reg.Version()})
 }
 
 // OnMonitorEvent handles one event for a "mon:<id>" job from a given site. It
@@ -500,9 +554,9 @@ func (s *MonitorSink) OnMonitorEvent(site string, ev *pb.JobEvent) {
 	case *pb.JobEvent_Started:
 		s.onStarted(st, ev, e.Started)
 	case *pb.JobEvent_Cycle:
-		s.onCycle(st, lv, e.Cycle)
+		s.onCycle(site, id, st, lv, e.Cycle)
 	case *pb.JobEvent_SipResult:
-		s.onSipResult(st, lv, e.SipResult)
+		s.onSipResult(site, id, st, lv, e.SipResult)
 	case *pb.JobEvent_Finished:
 		// A cancelled trace (reload, agent shutdown) is not a report: its
 		// aggregates cover part of a run, so it is dropped rather than
@@ -517,6 +571,7 @@ func (s *MonitorSink) OnMonitorEvent(site string, ev *pb.JobEvent) {
 		s.probesTotal.WithLabelValues(lv...).Inc()
 		s.up.WithLabelValues(lv...).Set(0)
 		s.mu.Lock()
+		s.keepLocked(site, id, st)
 		st.last = Outcome{At: time.Now(), Resolved: st.resolved, Source: st.source, Error: e.Error.Message}
 		if st.kind != "sip" {
 			st.last.LossPct = 100
@@ -564,7 +619,7 @@ func (s *MonitorSink) onStarted(st *monState, ev *pb.JobEvent, started *pb.JobSt
 
 // onCycle updates RTT, loss, and up from a trace/ping cycle, and keeps the
 // cycle for the report a trace monitor ships when it finishes.
-func (s *MonitorSink) onCycle(st *monState, lv []string, c *pb.Cycle) {
+func (s *MonitorSink) onCycle(site, id string, st *monState, lv []string, c *pb.Cycle) {
 	hop, reached := destHop(c)
 	s.probesTotal.WithLabelValues(lv...).Inc()
 	if reached {
@@ -579,6 +634,7 @@ func (s *MonitorSink) onCycle(st *monState, lv []string, c *pb.Cycle) {
 	s.lossRatio.WithLabelValues(lv...).Set(loss)
 
 	s.mu.Lock()
+	s.keepLocked(site, id, st)
 	st.last = Outcome{
 		At: time.Now(), Resolved: st.resolved, Source: st.source,
 		Up: reached, LossPct: loss * 100, Reached: reached, Cycles: c.Number, Hops: len(c.Hops),
@@ -592,14 +648,17 @@ func (s *MonitorSink) onCycle(st *monState, lv []string, c *pb.Cycle) {
 	s.mu.Unlock()
 }
 
-// onSipResult updates the SIP counters, code label, up, and RTT for one probe.
-func (s *MonitorSink) onSipResult(st *monState, lv []string, r *pb.SipResult) {
+// onSipResult updates the SIP counters, code label, up, and RTT for one
+// probe. Any final response counts as success: an OPTIONS probe measures
+// reachability, and a 403 or 503 proves the peer's SIP stack is up and
+// answering just as a 200 does. The code is still counted per value, so an
+// alert on a particular one remains possible.
+func (s *MonitorSink) onSipResult(site, id string, st *monState, lv []string, r *pb.SipResult) {
 	s.probesTotal.WithLabelValues(lv...).Inc()
 	code := "timeout"
-	success := false
+	success := r.Responded
 	if r.Responded {
 		code = strconv.Itoa(int(r.StatusCode))
-		success = r.StatusCode/100 == 2
 	}
 	codeLV := append(append([]string{}, lv...), code)
 	s.sipResponses.WithLabelValues(codeLV...).Inc()
@@ -612,6 +671,7 @@ func (s *MonitorSink) onSipResult(st *monState, lv []string, r *pb.SipResult) {
 	}
 
 	s.mu.Lock()
+	s.keepLocked(site, id, st)
 	st.last = Outcome{
 		At: time.Now(), Resolved: st.resolved, Source: st.source,
 		Up: success, Code: int(r.StatusCode), Reason: r.Reason, Responded: r.Responded,

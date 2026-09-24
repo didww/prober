@@ -91,12 +91,13 @@ func (a *API) listMonitors(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, out)
 		return
 	}
-	out.Version = a.reg.Version()
+	mons, version := a.reg.ListVersioned()
+	out.Version = version
 	aggs := map[string]Aggregate{}
 	if a.sink != nil {
 		aggs = a.sink.Aggregates()
 	}
-	for _, m := range a.reg.List() {
+	for _, m := range mons {
 		agg, ok := aggs[m.ID]
 		out.Monitors = append(out.Monitors, a.monitorJSON(m, agg, ok))
 	}

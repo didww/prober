@@ -103,6 +103,9 @@ func New(cfg Config, log *slog.Logger, build BuildInfo) (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The SIP library logs through the process default logger unless told
+	// otherwise; give it ours, with its per-probe close artefact dropped.
+	sip.UseLogger(log)
 	host, _ := os.Hostname()
 	a := &Agent{
 		cfg:      cfg,

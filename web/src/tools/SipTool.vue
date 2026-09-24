@@ -52,6 +52,8 @@ async function submit() {
 
 const rows = computed<SiteState[]>(() => state.order.map((s) => state.sites[s]).filter(Boolean))
 
+// Any response is reachability; the colour still tells a 200 from a 403 at
+// a glance, since the code is what the operator came to see.
 function codeClass(s: SiteState): string {
   if (s.sent === 0) return 'muted'
   if (!s.responded) return 'bad'

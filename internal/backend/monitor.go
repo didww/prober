@@ -55,13 +55,21 @@ func (r *MonitorRegistry) Version() uint64 {
 
 // List returns every configured monitor, in config order.
 func (r *MonitorRegistry) List() []MonitorConfig {
+	mons, _ := r.ListVersioned()
+	return mons
+}
+
+// ListVersioned returns the monitors and the version they belong to, read
+// together, so a reload in between cannot pair one version with another's
+// list.
+func (r *MonitorRegistry) ListVersioned() ([]MonitorConfig, uint64) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	out := make([]MonitorConfig, 0, len(r.order))
 	for _, id := range r.order {
 		out = append(out, r.byID[id])
 	}
-	return out
+	return out, r.version
 }
 
 // lookup returns a monitor's config by id (for the metrics/log sink).

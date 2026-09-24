@@ -140,13 +140,18 @@ export interface DnsStartRequest {
   timeout_ms?: number
 }
 
-// One answer: the address for A and AAAA, the target host plus priority,
-// weight and port for SRV.
+// One answer: the address for A and AAAA, the host for PTR, the target host
+// plus priority, weight and port for SRV.
 export interface DnsRecord {
   value: string
   priority: number
   weight: number
   port: number
+  ttl: number
+  // SRV only: the target's A and AAAA addresses; when there are none,
+  // address_status says why (NXDOMAIN, NODATA, SERVFAIL, TIMEOUT, ...).
+  addresses: string[]
+  address_status: string
 }
 
 export type DnsRunEvent =
@@ -158,6 +163,11 @@ export type DnsRunEvent =
       record_type: string
       name: string
       records: DnsRecord[]
+      // The response code by name (NOERROR, NXDOMAIN, SERVFAIL, REFUSED, or
+      // NODATA for an empty NOERROR), and the nameserver that gave it. Both
+      // empty when no server answered, in which case error says why.
+      status: string
+      server: string
       error: string
       rtt_us: number
     }

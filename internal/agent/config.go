@@ -11,10 +11,48 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"net"
+	"net/netip"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/didww/prober/internal/dns"
 )
+
+// DNSConfig is where the DNS tool sends its questions. Empty means this
+// host's resolv.conf, which is the normal setting: the point of the tool is
+// to show what the site's own resolver answers. Nameservers overrides that,
+// for a container whose resolv.conf is not the one that matters, or a test.
+type DNSConfig struct {
+	// Nameservers as an address, or address:port; a bare address gets port 53.
+	Nameservers []string `yaml:"nameservers"`
+}
+
+// client builds the DNS tool's client, or nil for the host's resolver.
+func (c DNSConfig) client() (*dns.Client, error) {
+	if len(c.Nameservers) == 0 {
+		return nil, nil
+	}
+	cl := &dns.Client{}
+	for _, ns := range c.Nameservers {
+		switch {
+		case ns == "":
+			return nil, errors.New("dns.nameservers: empty entry")
+		default:
+			if ap, err := netip.ParseAddrPort(ns); err == nil {
+				cl.Nameservers = append(cl.Nameservers, ap.String())
+				continue
+			}
+			addr, err := netip.ParseAddr(ns)
+			if err != nil {
+				return nil, fmt.Errorf("dns.nameservers: %q is not an address or address:port", ns)
+			}
+			cl.Nameservers = append(cl.Nameservers, net.JoinHostPort(addr.String(), "53"))
+		}
+	}
+	return cl, nil
+}
 
 // BackendConfig is how this agent reaches the backend.
 type BackendConfig struct {

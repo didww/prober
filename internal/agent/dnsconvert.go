@@ -30,9 +30,11 @@ func dnsEventToProto(jobID string, seq uint64, ev dns.Event) *pb.JobEvent {
 	case dns.ResultDone:
 		r := ev.Result
 		dr := &pb.DnsResult{
-			Type:  r.Query.Type,
-			Name:  r.Query.Name,
-			RttUs: uint32(r.RTT.Microseconds()),
+			Type:   r.Query.Type,
+			Name:   r.Query.Name,
+			RttUs:  uint32(r.RTT.Microseconds()),
+			Status: r.Status,
+			Server: r.Server,
 		}
 		if r.Err != nil {
 			dr.Error = r.Err.Error()
@@ -43,6 +45,10 @@ func dnsEventToProto(jobID string, seq uint64, ev dns.Event) *pb.JobEvent {
 				Priority: uint32(rec.Priority),
 				Weight:   uint32(rec.Weight),
 				Port:     uint32(rec.Port),
+				Ttl:      rec.TTL,
+
+				Addresses:     rec.Addresses,
+				AddressStatus: rec.AddressStatus,
 			})
 		}
 		je.Event = &pb.JobEvent_DnsResult{DnsResult: dr}

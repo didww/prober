@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"net/netip"
 	"slices"
 	"strconv"
 	"strings"
@@ -267,10 +266,6 @@ func (a *API) startDnsRun(w http.ResponseWriter, r *http.Request) {
 	req.Name = strings.TrimSpace(req.Name)
 	if req.Name == "" {
 		writeErr(w, http.StatusBadRequest, "name is required")
-		return
-	}
-	if _, err := netip.ParseAddr(strings.Trim(req.Name, "[]")); err == nil {
-		writeErr(w, http.StatusBadRequest, "enter a host name, not an address")
 		return
 	}
 	sites, ok := a.runSites(w, req.Sites)

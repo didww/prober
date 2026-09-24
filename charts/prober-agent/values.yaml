@@ -32,6 +32,16 @@ limits:
   minIntervalMs: 100
   maxTtl: 40
 
+# Where the DNS tool sends its questions. Empty uses the pod's resolv.conf,
+# which with hostNetwork and ClusterFirstWithHostNet is the node's resolver:
+# the point of the tool is to show what the site's own resolver answers. Set
+# it only when that resolv.conf is not the one that matters. Entries are an
+# address or address:port.
+dns:
+  nameservers: []
+  #  - 10.0.0.53
+  #  - "[2001:db8::53]:53"
+
 # Provide the whole config.yml via an existing Secret (key config.yml) instead
 # of the values above — useful when the token comes from an external secret store.
 existingSecret: ""

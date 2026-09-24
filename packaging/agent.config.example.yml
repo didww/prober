@@ -19,3 +19,10 @@ limits:
   max_cycles: 1000
   min_interval_ms: 100
   max_ttl: 40
+
+# Where the DNS tool sends its questions. Leave unset to use this host's
+# resolv.conf, which is the point of the tool: it shows what the site's own
+# resolver answers. Override only when the container's resolv.conf is not the
+# one that matters. Entries are an address or address:port.
+# dns:
+#   nameservers: ["10.0.0.53", "[2001:db8::53]:53"]

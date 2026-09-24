@@ -1,10 +1,11 @@
 <script setup lang="ts">
 // The DNS tool: resolve a name with each agent's own resolver and lay the
 // answers out as a matrix, sites down and record types across, so a GeoDNS
-// answer or a broken resolver at one site stands out.
+// answer or a broken resolver at one site stands out. An address gets its
+// PTR record instead.
 import { computed, onMounted, onBeforeUnmount, reactive, ref } from 'vue'
 import { listProbers, type DnsRecord, type Prober } from '../api'
-import { COLUMNS, createDnsRun, type DnsColumn, type QueryState, type SiteState } from '../dnsRunStore'
+import { ADDRESS_COLUMNS, NAME_COLUMNS, createDnsRun, type DnsColumn, type QueryState, type SiteState } from '../dnsRunStore'
 import { ms } from '../format'
 
 const probers = ref<Prober[]>([])
@@ -36,11 +37,17 @@ async function submit() {
 
 const rows = computed<SiteState[]>(() => state.order.map((s) => state.sites[s]).filter(Boolean))
 
+// The columns for what the run asked: the SIP set for a name, PTR for an
+// address.
+const columns = computed<DnsColumn[]>(() => (state.reverse ? ADDRESS_COLUMNS : NAME_COLUMNS))
+
 // The name the columns were asked for, as the first agent to start normalised
 // it, or as typed until then.
 const askedName = computed(() => rows.value.find((s) => s.name)?.name || form.name.trim())
 
-function queryName(c: DnsColumn): string {
+function queryName(c: DnsColumn, q?: QueryState): string {
+  if (q?.name) return q.name
+  if (c.type === 'PTR') return 'reverse of ' + askedName.value
   return c.prefix + askedName.value
 }
 
@@ -59,32 +66,47 @@ function recordText(r: DnsRecord, c: DnsColumn): string {
   return r.value
 }
 
-// A short word for a failed query; the resolver's full message is on hover.
-function errorLabel(err: string): string {
-  if (/i\/o timeout|deadline exceeded/i.test(err)) return 'timeout'
-  if (/server misbehaving|SERVFAIL/i.test(err)) return 'servfail'
-  if (/context canceled/i.test(err)) return 'cancelled'
+// What an answered-but-empty cell says: the response code the nameserver
+// gave (NXDOMAIN, NODATA, SERVFAIL, REFUSED, ...). When no server answered
+// at all, a short word for why; the full error is on hover. An agent too old
+// to report a code sends an empty answer with no error: just a dash.
+function emptyLabel(q: QueryState): string {
+  if (q.status) return q.status
+  if (!q.error) return '—'
+  if (/i\/o timeout|deadline exceeded/i.test(q.error)) return 'timeout'
+  if (/context canceled/i.test(q.error)) return 'cancelled'
+  if (/connection refused|unreachable|no route/i.test(q.error)) return 'unreachable'
   return 'error'
 }
 
+// How loud an empty cell is: NODATA is routine (a name without AAAA, say),
+// NXDOMAIN is worth a look, anything else means the lookup itself failed.
+function emptyClass(q: QueryState): string {
+  if (q.status === 'NODATA' || (!q.status && !q.error)) return 'dim'
+  if (q.status === 'NXDOMAIN') return 'warn'
+  return 'bad'
+}
+
 function cellTitle(q: QueryState, c: DnsColumn): string {
-  const name = `${c.type} ${queryName(c)}`
+  const name = `${c.type} ${queryName(c, q)}`
   if (!q.done) return `${name}: waiting`
   if (q.error) return `${name}: ${q.error}`
   const n = q.records.length
-  return `${name}: ${n} record${n === 1 ? '' : 's'} in ${ms(q.rttUs)} ms`
+  const parts = [q.status, `${n} record${n === 1 ? '' : 's'}`, q.server ? `from ${q.server}` : '', `in ${ms(q.rttUs)} ms`]
+  if (n) parts.push(`TTL ${Math.min(...q.records.map((r) => r.ttl))}s`)
+  return `${name}: ${parts.filter(Boolean).join(', ')}`
 }
 </script>
 
 <template>
   <div class="dns">
     <form class="bar" @submit.prevent="submit">
-      <label for="dns-name" class="sr-only">Host name to resolve</label>
+      <label for="dns-name" class="sr-only">Host name or address to resolve</label>
       <input
         id="dns-name"
         v-model="form.name"
         class="ctl target"
-        placeholder="Host name, e.g. sip.example.com"
+        placeholder="Host name (e.g. sip.example.com) or an IP address for its PTR"
         spellcheck="false"
         autocapitalize="off"
       />
@@ -105,7 +127,7 @@ function cellTitle(q: QueryState, c: DnsColumn): string {
         <thead>
           <tr>
             <th class="c-site">Site</th>
-            <th v-for="c in COLUMNS" :key="c.key" :title="c.type + ' ' + queryName(c)">
+            <th v-for="c in columns" :key="c.key" :title="c.type + ' ' + queryName(c)">
               <span v-if="c.type === 'SRV'" class="kind">SRV</span>{{ c.label }}
             </th>
           </tr>
@@ -121,14 +143,18 @@ function cellTitle(q: QueryState, c: DnsColumn): string {
                 via {{ s.nameservers.join(', ') }}
               </div>
             </td>
-            <td v-if="s.error" :colspan="COLUMNS.length" class="err">{{ s.error }}</td>
+            <td v-if="s.error" :colspan="columns.length" class="err">{{ s.error }}</td>
             <template v-else>
-              <td v-for="c in COLUMNS" :key="c.key" class="cell" :title="cellTitle(s.queries[c.key], c)">
+              <td v-for="c in columns" :key="c.key" class="cell" :title="cellTitle(s.queries[c.key], c)">
                 <span v-if="!s.queries[c.key].done" class="dim">…</span>
-                <span v-else-if="s.queries[c.key].error" class="bad">{{ errorLabel(s.queries[c.key].error) }}</span>
-                <span v-else-if="s.queries[c.key].records.length === 0" class="dim">—</span>
+                <span v-else-if="s.queries[c.key].records.length === 0" :class="emptyClass(s.queries[c.key])">{{ emptyLabel(s.queries[c.key]) }}</span>
                 <template v-else>
-                  <div v-for="(r, i) in s.queries[c.key].records" :key="i" class="rec">{{ recordText(r, c) }}</div>
+                  <div v-for="(r, i) in s.queries[c.key].records" :key="i" class="rec">
+                    {{ recordText(r, c) }}
+                    <div v-if="c.type === 'SRV' && r.value !== '.'" class="addrs" :class="{ bad: r.addresses.length === 0 }">
+                      {{ r.addresses.length ? r.addresses.join(', ') : 'no address (' + r.address_status + ')' }}
+                    </div>
+                  </div>
                 </template>
               </td>
             </template>
@@ -137,7 +163,10 @@ function cellTitle(q: QueryState, c: DnsColumn): string {
       </table>
     </div>
 
-    <div v-else class="hint">Enter a host name and press Resolve to look it up from every selected site.</div>
+    <div v-else class="hint">
+      Enter a host name, or an IP address for its PTR record, and press Resolve to look it up from every selected site.
+      <br /><span class="small">Names are asked exactly as typed, through each site's own nameservers; the hosts file and search list are not used.</span>
+    </div>
   </div>
 </template>
 
@@ -183,8 +212,13 @@ tbody tr:hover { background: var(--hover); }
 .ns { margin-top: 2px; color: var(--fg-dim); font-size: 11px; font-variant-numeric: tabular-nums; }
 .cell { font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
 .rec { white-space: nowrap; }
+/* An SRV target's addresses, under its record. */
+.addrs { padding-left: 14px; color: var(--fg-dim); font-size: 11px; }
+.addrs.bad { color: var(--bad); font-weight: 600; }
 .dim { color: var(--fg-dim); }
+.warn { color: var(--warn); font-weight: 600; cursor: help; }
 .bad { color: var(--bad); font-weight: 600; cursor: help; }
 .err { color: var(--bad); font-size: 13px; white-space: normal; }
-.hint { color: var(--fg-dim); padding: 40px 16px; text-align: center; }
+.hint { color: var(--fg-dim); padding: 40px 16px; text-align: center; line-height: 1.7; }
+.hint .small { font-size: 12px; }
 </style>

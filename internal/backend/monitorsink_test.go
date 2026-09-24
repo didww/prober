@@ -276,7 +276,7 @@ func TestSinkDropsCancelledAndStaleTraces(t *testing.T) {
 	expectNoMore(t, recs)
 
 	// The page shows the failure as a full loss, not a healthy-looking 0%.
-	st := s.AllStatuses()["t1"]
+	st := s.Statuses("t1")
 	if len(st) != 1 || st[0].Up || st[0].LossPct != 100 || st[0].Error != "no such host" {
 		t.Fatalf("status after resolve failure: %+v", st)
 	}
@@ -289,6 +289,155 @@ func TestSinkDropsCancelledAndStaleTraces(t *testing.T) {
 	}})
 	if got := drain(t, recs, 1); len(got) != 1 || got[0]["reached"] != true {
 		t.Fatalf("completed run: %+v", got)
+	}
+}
+
+func TestSinkAggregateAndStream(t *testing.T) {
+	s := newTestSink(t, []MonitorConfig{
+		{ID: "t1", Kind: "ping", Target: "1.2.3.4", IntervalS: 10},
+		{ID: "t2", Kind: "ping", Target: "5.6.7.8", IntervalS: 10},
+	}, nil)
+	snapshot, _, changes, cancel := s.Subscribe()
+	defer cancel()
+	if len(snapshot) != 0 {
+		t.Fatalf("snapshot before any result: %v", snapshot)
+	}
+	next := func() StatusEvent {
+		t.Helper()
+		select {
+		case ev, ok := <-changes:
+			if !ok {
+				t.Fatal("stream closed")
+			}
+			return ev
+		case <-time.After(2 * time.Second):
+			t.Fatal("no status event")
+		}
+		return StatusEvent{}
+	}
+	none := func() {
+		t.Helper()
+		select {
+		case ev := <-changes:
+			t.Fatalf("unexpected status event: %+v", ev)
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+	cycle := func(id, site string, reached bool) {
+		c := &pb.Cycle{Number: 1, Hops: []*pb.Hop{{Ttl: 1, Addresses: []*pb.HopAddress{{Ip: "1.2.3.4"}}, Sent: 3, Received: 3, AvgUs: 1000}}}
+		if reached {
+			c.ReachedAt = 1
+		} else {
+			c.Hops[0].Received, c.Hops[0].LossPct = 0, 100
+		}
+		s.OnMonitorEvent(site, &pb.JobEvent{JobId: "mon:" + id, Event: &pb.JobEvent_Cycle{Cycle: c}})
+	}
+
+	// One site up: UP. A second site down: PARTIAL. The same again: no
+	// event, nothing changed.
+	cycle("t1", "fra", true)
+	if ev := next(); ev.ID != "t1" || ev.Aggregate.State != StateUp || ev.Aggregate.Up != 1 || ev.Aggregate.Sites != 1 || ev.Aggregate.Since.IsZero() {
+		t.Fatalf("first result: %+v", ev)
+	}
+	cycle("t1", "ams", false)
+	ev := next()
+	if ev.Aggregate.State != StatePartial || ev.Aggregate.Up != 1 || ev.Aggregate.Down != 1 {
+		t.Fatalf("second site down: %+v", ev)
+	}
+	partialSince := ev.Aggregate.Since
+	cycle("t1", "ams", false)
+	none()
+
+	// Both down: DOWN, with a new Since. Since holds while the state does.
+	cycle("t1", "fra", false)
+	ev = next()
+	if ev.Aggregate.State != StateDown || ev.Aggregate.Down != 2 || !ev.Aggregate.Since.After(partialSince) {
+		t.Fatalf("both down: %+v", ev)
+	}
+	downSince := ev.Aggregate.Since
+	if got, ok := s.Aggregate("t1"); !ok || got.State != StateDown || !got.Since.Equal(downSince) {
+		t.Fatalf("aggregate: %+v", got)
+	}
+
+	// Sites go stale with time, which only a sweep notices, and a sweep
+	// reports everything it moved in one batch. A sweep that changes nothing
+	// publishes nothing.
+	cycle("t1", "fra", true)
+	if ev = next(); ev.Aggregate.State != StatePartial {
+		t.Fatalf("fra back up: %+v", ev)
+	}
+	s.Sweep(time.Now())
+	none()
+	s.Sweep(time.Now().Add(2 * time.Minute))
+	// Both outcomes are now older than staleAfter (max(30s, 1m)).
+	if ev = next(); ev.ID != "" || ev.Changes["t1"].State != StateNoData || ev.Changes["t1"].Stale != 2 {
+		t.Fatalf("after a stale sweep: %+v", ev)
+	}
+	// Statuses judges staleness by the clock, not the sweep's chosen time,
+	// so the sites still read as current here.
+	if st := s.Statuses("t1"); len(st) != 2 || st[0].Site != "ams" || st[0].Stale || st[1].Site != "fra" {
+		t.Fatalf("statuses: %+v", st)
+	}
+
+	// A reload that narrows t1 to fra and slows it: ams is dropped, and
+	// fra's staleness follows the new interval, so the sweep that found it
+	// stale before now finds it current.
+	s.reg.Replace([]MonitorConfig{
+		{ID: "t1", Kind: "ping", Target: "1.2.3.4", IntervalS: 600, Sites: []string{"fra"}},
+		{ID: "t2", Kind: "ping", Target: "5.6.7.8", IntervalS: 10},
+	})
+	s.Retain()
+	if ev = next(); ev.ID != "" || ev.Changes != nil || ev.Version != 2 {
+		t.Fatalf("reload event: %+v", ev)
+	}
+	if st := s.Statuses("t1"); len(st) != 1 || st[0].Site != "fra" {
+		t.Fatalf("statuses after narrowing: %+v", st)
+	}
+	s.Sweep(time.Now().Add(2 * time.Minute))
+	if ev = next(); ev.Changes["t1"].State != StateUp || ev.Changes["t1"].Stale != 0 {
+		t.Fatalf("after reload with a longer interval: %+v", ev)
+	}
+
+	// A site silent for longer than forgetAfter is dropped altogether: no
+	// retired agent pins a monitor.
+	s.Sweep(time.Now().Add(forgetAfter + time.Minute))
+	if ev = next(); ev.Changes["t1"].State != StateNoData || ev.Changes["t1"].Sites != 0 {
+		t.Fatalf("after forgetting: %+v", ev)
+	}
+	if st := s.Statuses("t1"); len(st) != 0 {
+		t.Fatalf("statuses after forgetting: %+v", st)
+	}
+
+	// A removed monitor loses its aggregate on reload.
+	s.reg.Replace([]MonitorConfig{{ID: "t2", Kind: "ping", Target: "5.6.7.8", IntervalS: 10}})
+	s.Retain()
+	if ev = next(); ev.Version != 3 {
+		t.Fatalf("second reload: %+v", ev)
+	}
+	if _, has := s.Aggregate("t1"); has {
+		t.Fatal("removed monitor still has an aggregate")
+	}
+
+	// A subscriber that stops reading is cut off rather than blocking the
+	// sink, and a new subscription starts from a snapshot.
+	cycle("t2", "fra", true)
+	next()
+	for i := 0; i < 1100; i++ {
+		s.publish(StatusEvent{ID: "t2", Aggregate: Aggregate{State: StateUp}})
+	}
+	closed := false
+	for !closed {
+		select {
+		case _, ok := <-changes:
+			closed = !ok
+		case <-time.After(2 * time.Second):
+			t.Fatal("slow subscriber was not cut off")
+		}
+	}
+	snapshot, version, _, cancel2 := s.Subscribe()
+	defer cancel2()
+	if version != 3 || snapshot["t2"].State != StateUp {
+		t.Fatalf("fresh snapshot: version=%d %v", version, snapshot)
 	}
 }
 

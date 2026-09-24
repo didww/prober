@@ -201,12 +201,14 @@ export interface MonitorSipParams {
 }
 
 // One site's latest outcome for a monitor. up is null and at empty until the
-// site has reported a result.
+// site has reported a result; stale means the result is old enough that the
+// agent has evidently stopped reporting.
 export interface MonitorSiteStatus {
   site: string
   connected: boolean
   at: string
   up: boolean | null
+  stale: boolean
   resolved: string
   source: string
   loss_pct: number
@@ -220,6 +222,20 @@ export interface MonitorSiteStatus {
   error: string
 }
 
+// A monitor's state across its sites: up when every reporting site is up,
+// down when none is, partial in between, nodata when nothing has reported or
+// every site is stale. since is when the state last changed, absent while
+// nothing has reported.
+export type MonitorState = 'up' | 'down' | 'partial' | 'nodata'
+export interface MonitorAggregate {
+  state: MonitorState
+  up: number
+  down: number
+  stale: number
+  sites: number
+  since?: string
+}
+
 export interface Monitor {
   id: string
   kind: 'trace' | 'ping' | 'sip'
@@ -231,8 +247,27 @@ export interface Monitor {
   sip?: MonitorSipParams
   // Whether reports can be fetched: a trace monitor with VictoriaLogs on.
   history: boolean
+  state: MonitorAggregate
+}
+
+export interface MonitorList {
+  // The configuration version; the status stream says when it changes.
+  version: number
+  monitors: Monitor[]
+}
+
+export interface MonitorDetail extends Monitor {
   status: MonitorSiteStatus[]
 }
+
+// The status stream: a snapshot of every monitor's state on connect, then
+// one change at a time, a batch of changes after a sweep, and a reload when
+// the configuration changed.
+export type MonitorStatusEvent =
+  | { type: 'snapshot'; version: number; states: Record<string, MonitorAggregate> }
+  | ({ type: 'change'; id: string } & MonitorAggregate)
+  | { type: 'changes'; states: Record<string, MonitorAggregate> }
+  | { type: 'reload'; version: number }
 
 // One shipped trace: the summary for its row and the mtr text.
 export interface TraceReport {
@@ -253,8 +288,34 @@ export interface TraceReport {
 export type ReportRange = '1h' | '6h' | '24h' | '7d' | '30d'
 export const REPORT_RANGES: ReportRange[] = ['1h', '6h', '24h', '7d', '30d']
 
-export async function listMonitors(): Promise<Monitor[]> {
-  return (await getJSON<Monitor[] | null>('monitors')) ?? []
+export async function listMonitors(): Promise<MonitorList> {
+  const l = await getJSON<MonitorList | null>('monitors')
+  return l ?? { version: 0, monitors: [] }
+}
+
+export async function getMonitor(id: string): Promise<MonitorDetail> {
+  return getJSON<MonitorDetail>(`monitors/${encodeURIComponent(id)}`)
+}
+
+// subscribeMonitorStatus opens the status stream. The browser reconnects on
+// its own after a drop and the server then starts over with a snapshot;
+// onDown fires when the connection is lost, so the page can say so.
+export function subscribeMonitorStatus(onEvent: (ev: MonitorStatusEvent) => void, onDown: () => void): EventSource {
+  const es = new EventSource(apiURL('monitors-status'), { withCredentials: true })
+  for (const name of ['snapshot', 'change', 'changes', 'reload'] as const) {
+    es.addEventListener(name, ((e: MessageEvent) => {
+      try {
+        onEvent({ ...JSON.parse(e.data), type: name })
+      } catch {
+        /* a frame we cannot parse is one event lost; the stream continues */
+      }
+    }) as EventListener)
+  }
+  es.addEventListener('error', () => {
+    onDown()
+    if (es.readyState === EventSource.CLOSED) void probe()
+  })
+  return es
 }
 
 export async function listTraceReports(

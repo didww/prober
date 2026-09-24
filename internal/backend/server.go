@@ -141,6 +141,7 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 	g.Go(func() error { s.mgr.Reap(ctx); return nil })
 	g.Go(func() error { s.vl.Run(ctx); return nil })
+	g.Go(func() error { s.sink.Run(ctx); return nil })
 
 	s.ready.set(true)
 	s.log.Info("prober-backend listening",

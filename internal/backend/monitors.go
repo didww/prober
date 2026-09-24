@@ -2,6 +2,7 @@ package backend
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"slices"
 	"strconv"
@@ -11,8 +12,10 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// The monitors page API: every configured monitor with what it probes and each
-// site's latest outcome, and for trace monitors the reports shipped to
+// The monitors page API. The list is the configuration plus one aggregate
+// state per monitor, small enough to fetch once; the stream pushes aggregate
+// changes as they happen; the detail is one monitor's outcome at every site,
+// fetched when its row is expanded; and a trace monitor's reports come from
 // VictoriaLogs.
 
 type monitorJSON struct {
@@ -27,8 +30,19 @@ type monitorJSON struct {
 	SIP    *SipParams        `json:"sip,omitempty"`
 	// History is whether reports can be fetched: a trace monitor with
 	// VictoriaLogs configured.
-	History bool             `json:"history"`
-	Status  []siteStatusJSON `json:"status"`
+	History bool      `json:"history"`
+	State   Aggregate `json:"state"`
+}
+
+type monitorListJSON struct {
+	// Version is the registry's; the stream announces when it changes.
+	Version  uint64        `json:"version"`
+	Monitors []monitorJSON `json:"monitors"`
+}
+
+type monitorDetailJSON struct {
+	monitorJSON
+	Status []siteStatusJSON `json:"status"`
 }
 
 // siteStatusJSON is one site's latest outcome. Up is null and At empty until
@@ -38,6 +52,7 @@ type siteStatusJSON struct {
 	Connected bool     `json:"connected"`
 	At        string   `json:"at"`
 	Up        *bool    `json:"up"`
+	Stale     bool     `json:"stale"`
 	Resolved  string   `json:"resolved"`
 	Source    string   `json:"source"`
 	LossPct   float64  `json:"loss_pct"`
@@ -51,80 +66,165 @@ type siteStatusJSON struct {
 	Error     string   `json:"error"`
 }
 
+func (a *API) monitorJSON(m MonitorConfig, agg Aggregate, reported bool) monitorJSON {
+	mj := monitorJSON{
+		ID: m.ID, Kind: monitorKind(m), Target: m.Target, IntervalS: m.IntervalS,
+		Sites: m.Sites, Labels: m.Labels, Trace: m.Trace, SIP: m.SIP,
+		History: a.vl != nil && a.vl.Enabled() && monitorKind(m) == "trace",
+		State:   Aggregate{State: StateNoData},
+	}
+	if mj.Sites == nil {
+		mj.Sites = []string{}
+	}
+	if mj.Labels == nil {
+		mj.Labels = map[string]string{}
+	}
+	if reported {
+		mj.State = agg
+	}
+	return mj
+}
+
 func (a *API) listMonitors(w http.ResponseWriter, r *http.Request) {
-	out := []monitorJSON{}
+	out := monitorListJSON{Monitors: []monitorJSON{}}
 	if a.reg == nil {
 		writeJSON(w, http.StatusOK, out)
+		return
+	}
+	out.Version = a.reg.Version()
+	aggs := map[string]Aggregate{}
+	if a.sink != nil {
+		aggs = a.sink.Aggregates()
+	}
+	for _, m := range a.reg.List() {
+		agg, ok := aggs[m.ID]
+		out.Monitors = append(out.Monitors, a.monitorJSON(m, agg, ok))
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (a *API) monitorDetail(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if a.reg == nil {
+		writeErr(w, http.StatusNotFound, "no such monitor")
+		return
+	}
+	m, ok := a.reg.lookup(id)
+	if !ok {
+		writeErr(w, http.StatusNotFound, "no such monitor")
 		return
 	}
 	connected := map[string]bool{}
 	for _, h := range a.gw.Sites() {
 		connected[h.Site] = true
 	}
-	history := a.vl != nil && a.vl.Enabled()
-	statuses := map[string][]MonitorStatus{}
+	var agg Aggregate
+	var reported bool
+	var latest []MonitorStatus
 	if a.sink != nil {
-		statuses = a.sink.AllStatuses()
+		agg, reported = a.sink.Aggregate(id)
+		latest = a.sink.Statuses(id)
 	}
+	out := monitorDetailJSON{monitorJSON: a.monitorJSON(m, agg, reported), Status: []siteStatusJSON{}}
 
-	for _, m := range a.reg.List() {
-		mj := monitorJSON{
-			ID: m.ID, Kind: monitorKind(m), Target: m.Target, IntervalS: m.IntervalS,
-			Sites: m.Sites, Labels: m.Labels, Trace: m.Trace, SIP: m.SIP,
-			History: history && monitorKind(m) == "trace",
-			Status:  []siteStatusJSON{},
+	// The sites the monitor runs at: the configured ones, else every
+	// connected agent; plus any site that has reported, so one whose agent
+	// has since gone still shows its last outcome.
+	sites := map[string]bool{}
+	if len(m.Sites) > 0 {
+		for _, s := range m.Sites {
+			sites[s] = true
 		}
-		if mj.Sites == nil {
-			mj.Sites = []string{}
+	} else {
+		for s := range connected {
+			sites[s] = true
 		}
-		if mj.Labels == nil {
-			mj.Labels = map[string]string{}
-		}
-
-		// The sites the monitor runs at: the configured ones, else every
-		// connected agent; plus any site that has reported, so one whose
-		// agent has since gone still shows its last outcome.
-		sites := map[string]bool{}
-		if len(m.Sites) > 0 {
-			for _, s := range m.Sites {
-				sites[s] = true
+	}
+	bySite := map[string]MonitorStatus{}
+	for _, st := range latest {
+		bySite[st.Site] = st
+		sites[st.Site] = true
+	}
+	names := make([]string, 0, len(sites))
+	for s := range sites {
+		names = append(names, s)
+	}
+	slices.Sort(names)
+	for _, site := range names {
+		sj := siteStatusJSON{Site: site, Connected: connected[site]}
+		if st, ok := bySite[site]; ok {
+			up := st.Up
+			sj.Up = &up
+			sj.Stale = st.Stale
+			sj.At = st.At.UTC().Format(time.RFC3339)
+			sj.Resolved, sj.Source = st.Resolved, st.Source
+			sj.LossPct = st.LossPct
+			if st.HasRTT {
+				rtt := usToMs(st.RTTUs)
+				sj.RTTMs = &rtt
 			}
-		} else {
-			for s := range connected {
-				sites[s] = true
-			}
+			sj.Reached, sj.Cycles, sj.Hops = st.Reached, st.Cycles, st.Hops
+			sj.Code, sj.Reason, sj.Responded = st.Code, st.Reason, st.Responded
+			sj.Error = st.Error
 		}
-		latest := map[string]MonitorStatus{}
-		for _, st := range statuses[m.ID] {
-			latest[st.Site] = st
-			sites[st.Site] = true
-		}
-		names := make([]string, 0, len(sites))
-		for s := range sites {
-			names = append(names, s)
-		}
-		slices.Sort(names)
-		for _, site := range names {
-			sj := siteStatusJSON{Site: site, Connected: connected[site]}
-			if st, ok := latest[site]; ok {
-				up := st.Up
-				sj.Up = &up
-				sj.At = st.At.UTC().Format(time.RFC3339)
-				sj.Resolved, sj.Source = st.Resolved, st.Source
-				sj.LossPct = st.LossPct
-				if st.HasRTT {
-					rtt := usToMs(st.RTTUs)
-					sj.RTTMs = &rtt
-				}
-				sj.Reached, sj.Cycles, sj.Hops = st.Reached, st.Cycles, st.Hops
-				sj.Code, sj.Reason, sj.Responded = st.Code, st.Reason, st.Responded
-				sj.Error = st.Error
-			}
-			mj.Status = append(mj.Status, sj)
-		}
-		out = append(out, mj)
+		out.Status = append(out.Status, sj)
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// monitorStatusStream is the SSE feed of aggregate changes. It opens with a
+// snapshot of every monitor's state and the registry version, then sends a
+// change event per monitor as outcomes land, a changes event with a batch
+// when a sweep moved several, and a reload event when the configuration
+// changed. There is no replay: a reconnecting client gets a fresh snapshot.
+func (a *API) monitorStatusStream(w http.ResponseWriter, r *http.Request) {
+	if a.sink == nil {
+		writeErr(w, http.StatusServiceUnavailable, "monitoring is not configured")
+		return
+	}
+	flusher, ok := startSSE(w)
+	if !ok {
+		return
+	}
+	snapshot, version, changes, cancel := a.sink.Subscribe()
+	defer cancel()
+	writeEvent(w, "snapshot", map[string]any{"version": version, "states": snapshot})
+	flusher.Flush()
+
+	ping := time.NewTicker(sseKeepalive)
+	defer ping.Stop()
+	ctx := r.Context()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev, ok := <-changes:
+			if !ok {
+				// Fell behind: end the stream so the browser reconnects and
+				// starts over from a snapshot.
+				return
+			}
+			switch {
+			case ev.ID != "":
+				writeEvent(w, "change", struct {
+					ID string `json:"id"`
+					Aggregate
+				}{ev.ID, ev.Aggregate})
+			case ev.Changes != nil:
+				writeEvent(w, "changes", map[string]any{"states": ev.Changes})
+			default:
+				writeEvent(w, "reload", map[string]any{"version": ev.Version})
+			}
+			flusher.Flush()
+		case <-ping.C:
+			writeSSEComment(w, flusher)
+		}
+	}
+}
+
+func writeEvent(w http.ResponseWriter, name string, v any) {
+	data, _ := json.Marshal(v)
+	writeSSEFrame(w, 0, name, data)
 }
 
 // traceReportJSON is one shipped trace as the history panel shows it: the

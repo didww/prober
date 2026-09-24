@@ -1,6 +1,8 @@
 package backend
 
 import (
+	"bufio"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -99,6 +101,7 @@ func TestMonitorsAPI(t *testing.T) {
 		{ID: "s1", Kind: "sip", Target: "5.5.5.5", IntervalS: 10, Sites: []string{"ams", "fra"},
 			SIP: &SipParams{Transport: "udp", Port: 5060}},
 		{ID: "p1", Kind: "ping", Target: "8.8.8.8", IntervalS: 15},
+		{ID: "q1", Kind: "ping", Target: "9.9.9.9", IntervalS: 15},
 	})
 	sink := NewMonitorSink(reg, vl, prometheus.NewRegistry())
 	gw := NewGateway(Config{}, log)
@@ -129,43 +132,149 @@ func TestMonitorsAPI(t *testing.T) {
 		Error: &pb.JobError{Code: pb.JobError_CODE_RESOLVE, Message: "no such host"},
 	}})
 
-	var mons []monitorJSON
-	getJSON(t, srv.URL+"/monitors", http.StatusOK, &mons)
-	if len(mons) != 3 || mons[0].ID != "t1" || mons[1].ID != "s1" || mons[2].ID != "p1" {
-		t.Fatalf("monitors: %+v", mons)
+	// The list is the configuration plus one aggregate per monitor.
+	var list monitorListJSON
+	getJSON(t, srv.URL+"/monitors", http.StatusOK, &list)
+	mons := list.Monitors
+	if list.Version != 1 || len(mons) != 4 || mons[0].ID != "t1" || mons[1].ID != "s1" || mons[2].ID != "p1" || mons[3].ID != "q1" {
+		t.Fatalf("monitors: %+v", list)
 	}
-
+	// A monitor that never reported has no data and no "since" at all, so
+	// the page cannot render the zero time as an age.
+	if q := mons[3]; q.State.State != StateNoData || !q.State.Since.IsZero() {
+		t.Errorf("silent monitor: %+v", q.State)
+	}
+	var raw struct {
+		Monitors []struct {
+			ID    string         `json:"id"`
+			State map[string]any `json:"state"`
+		} `json:"monitors"`
+	}
+	getJSON(t, srv.URL+"/monitors", http.StatusOK, &raw)
+	if _, has := raw.Monitors[3].State["since"]; has {
+		t.Errorf("silent monitor carries since: %v", raw.Monitors[3].State)
+	}
+	if _, has := raw.Monitors[0].State["since"]; !has {
+		t.Errorf("reporting monitor lacks since: %v", raw.Monitors[0].State)
+	}
 	tr := mons[0]
 	if tr.Kind != "trace" || !tr.History || tr.Labels["supplier"] != "acme" || tr.Trace == nil || tr.Trace.MaxTTL != 30 || len(tr.Sites) != 0 {
 		t.Errorf("trace monitor: %+v", tr)
 	}
-	// No agent is connected, so the only site listed is the one that reported.
-	if len(tr.Status) != 1 || tr.Status[0].Site != "fra" || tr.Status[0].Connected {
-		t.Fatalf("trace status: %+v", tr.Status)
+	if tr.State.State != StateUp || tr.State.Up != 1 || tr.State.Sites != 1 {
+		t.Errorf("trace aggregate: %+v", tr.State)
 	}
-	fs := tr.Status[0]
-	if fs.Up == nil || !*fs.Up || !fs.Reached || fs.Hops != 2 || fs.Cycles != 3 || fs.LossPct != 33.3 || fs.RTTMs == nil || *fs.RTTMs != 12 || fs.Resolved != "1.2.3.4" || fs.At == "" {
-		t.Errorf("fra trace status: %+v", fs)
-	}
-
-	sp := mons[1]
-	if sp.Kind != "sip" || sp.History || sp.SIP == nil || sp.SIP.Port != 5060 {
+	// ams answered, fra timed out: partial.
+	if sp := mons[1]; sp.Kind != "sip" || sp.History || sp.SIP == nil || sp.SIP.Port != 5060 || sp.State.State != StatePartial || sp.State.Up != 1 || sp.State.Down != 1 {
 		t.Errorf("sip monitor: %+v", sp)
 	}
-	// Configured sites are listed even without data or an agent, in order.
-	if len(sp.Status) != 2 || sp.Status[0].Site != "ams" || sp.Status[1].Site != "fra" {
-		t.Fatalf("sip status: %+v", sp.Status)
-	}
-	if a := sp.Status[0]; a.Up == nil || !*a.Up || a.Code != 200 || a.Reason != "OK" || !a.Responded || a.RTTMs == nil || *a.RTTMs != 30 {
-		t.Errorf("ams sip status: %+v", a)
-	}
-	if f := sp.Status[1]; f.Up == nil || *f.Up || f.Responded || f.RTTMs != nil {
-		t.Errorf("fra sip status (timeout): %+v", f)
+	if p := mons[2]; p.State.State != StateDown || p.State.Down != 1 {
+		t.Errorf("ping monitor (error): %+v", p.State)
 	}
 
-	if p := mons[2].Status; len(p) != 1 || p[0].Up == nil || *p[0].Up || p[0].Error != "no such host" || p[0].LossPct != 100 {
+	// The detail carries every site's outcome.
+	var det monitorDetailJSON
+	getJSON(t, srv.URL+"/monitors/t1", http.StatusOK, &det)
+	if det.ID != "t1" || det.State.State != StateUp {
+		t.Fatalf("detail: %+v", det)
+	}
+	// No agent is connected, so the only site listed is the one that reported.
+	if len(det.Status) != 1 || det.Status[0].Site != "fra" || det.Status[0].Connected {
+		t.Fatalf("trace status: %+v", det.Status)
+	}
+	fs := det.Status[0]
+	if fs.Up == nil || !*fs.Up || fs.Stale || !fs.Reached || fs.Hops != 2 || fs.Cycles != 3 || fs.LossPct != 33.3 || fs.RTTMs == nil || *fs.RTTMs != 12 || fs.Resolved != "1.2.3.4" || fs.At == "" {
+		t.Errorf("fra trace status: %+v", fs)
+	}
+	getJSON(t, srv.URL+"/monitors/s1", http.StatusOK, &det)
+	// Configured sites are listed even without data or an agent, in order.
+	if len(det.Status) != 2 || det.Status[0].Site != "ams" || det.Status[1].Site != "fra" {
+		t.Fatalf("sip status: %+v", det.Status)
+	}
+	if a := det.Status[0]; a.Up == nil || !*a.Up || a.Code != 200 || a.Reason != "OK" || !a.Responded || a.RTTMs == nil || *a.RTTMs != 30 {
+		t.Errorf("ams sip status: %+v", a)
+	}
+	if f := det.Status[1]; f.Up == nil || *f.Up || f.Responded || f.RTTMs != nil {
+		t.Errorf("fra sip status (timeout): %+v", f)
+	}
+	getJSON(t, srv.URL+"/monitors/p1", http.StatusOK, &det)
+	if p := det.Status; len(p) != 1 || p[0].Up == nil || *p[0].Up || p[0].Error != "no such host" || p[0].LossPct != 100 {
 		t.Errorf("ping status (error): %+v", p)
 	}
+	getJSON(t, srv.URL+"/monitors/nope", http.StatusNotFound, nil)
+
+	// The stream opens with a snapshot, then carries changes.
+	sctx, scancel := context.WithCancel(context.Background())
+	defer scancel()
+	sreq, _ := http.NewRequestWithContext(sctx, http.MethodGet, srv.URL+"/monitors-status", nil)
+	sresp, err := http.DefaultClient.Do(sreq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sresp.Body.Close()
+	events := make(chan [2]string, 16)
+	go func() {
+		sc := bufio.NewScanner(sresp.Body)
+		name := ""
+		for sc.Scan() {
+			line := sc.Text()
+			if v, ok := strings.CutPrefix(line, "event: "); ok {
+				name = v
+			} else if v, ok := strings.CutPrefix(line, "data: "); ok {
+				events <- [2]string{name, v}
+			}
+		}
+	}()
+	nextEvent := func() [2]string {
+		t.Helper()
+		select {
+		case ev := <-events:
+			return ev
+		case <-time.After(3 * time.Second):
+			t.Fatal("no stream event")
+		}
+		return [2]string{}
+	}
+	if ev := nextEvent(); ev[0] != "snapshot" {
+		t.Fatalf("first event: %v", ev)
+	} else {
+		var snap struct {
+			Version uint64               `json:"version"`
+			States  map[string]Aggregate `json:"states"`
+		}
+		if err := json.Unmarshal([]byte(ev[1]), &snap); err != nil || snap.Version != 1 || snap.States["t1"].State != StateUp || snap.States["s1"].State != StatePartial {
+			t.Fatalf("snapshot: %v (%v)", ev[1], err)
+		}
+	}
+	// fra's SIP probe answers: s1 goes from partial to up.
+	sink.OnMonitorEvent("fra", &pb.JobEvent{JobId: "mon:s1", Event: &pb.JobEvent_SipResult{
+		SipResult: &pb.SipResult{Cycle: 2, StatusCode: 200, Reason: "OK", Responded: true},
+	}})
+	if ev := nextEvent(); ev[0] != "change" {
+		t.Fatalf("change event: %v", ev)
+	} else {
+		var ch struct {
+			ID string `json:"id"`
+			Aggregate
+		}
+		if err := json.Unmarshal([]byte(ev[1]), &ch); err != nil || ch.ID != "s1" || ch.State != StateUp || ch.Up != 2 {
+			t.Fatalf("change: %v (%v)", ev[1], err)
+		}
+	}
+	// A sweep's changes arrive as one batch: two minutes on, the 10s and 15s
+	// monitors are stale (t1's 60s interval allows three minutes).
+	sink.Sweep(time.Now().Add(2 * time.Minute))
+	if ev := nextEvent(); ev[0] != "changes" {
+		t.Fatalf("batch event: %v", ev)
+	} else {
+		var batch struct {
+			States map[string]Aggregate `json:"states"`
+		}
+		if err := json.Unmarshal([]byte(ev[1]), &batch); err != nil || len(batch.States) != 2 || batch.States["s1"].State != StateNoData || batch.States["s1"].Stale != 2 || batch.States["p1"].State != StateNoData {
+			t.Fatalf("batch: %v (%v)", ev[1], err)
+		}
+	}
+	scancel()
 
 	// History for the trace monitor comes from VictoriaLogs, newest first,
 	// with the strings it returns parsed back.
@@ -196,8 +305,8 @@ func TestMonitorsAPI(t *testing.T) {
 
 	// Without VictoriaLogs the page still lists monitors, without history.
 	api.SetMonitoring(reg, sink, vlog.New(vlog.Options{}, log))
-	getJSON(t, srv.URL+"/monitors", http.StatusOK, &mons)
-	if mons[0].History {
+	getJSON(t, srv.URL+"/monitors", http.StatusOK, &list)
+	if list.Monitors[0].History {
 		t.Error("history offered without victorialogs")
 	}
 	getJSON(t, srv.URL+"/monitors/t1/reports", http.StatusServiceUnavailable, nil)

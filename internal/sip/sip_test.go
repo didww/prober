@@ -2,6 +2,7 @@ package sip
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"net"
 	"net/netip"
@@ -68,7 +69,7 @@ func run(t *testing.T, spec Spec) []Event {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	var evs []Event
-	log := slog.New(slog.NewTextHandler(nil, &slog.HandlerOptions{Level: slog.LevelError}))
+	log := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
 	if err := Run(ctx, spec, log, func(e Event) { evs = append(evs, e) }); err != nil {
 		t.Fatalf("run: %v", err)
 	}

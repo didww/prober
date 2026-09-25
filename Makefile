@@ -47,9 +47,18 @@ test:
 ## monitoring end-to-end test), which need raw sockets.
 ## Runs them as root inside an unprivileged user+network namespace, so no
 ## sudo and no capability on the binary is required. This is what CI runs.
+## The dummy interface gives the engine's leak test an address that never
+## answers; where the dummy module is missing that half of the test skips.
 .PHONY: test-trace
 test-trace:
-	unshare -Urn sh -c 'ip link set lo up && go test -count=1 ./internal/trace/... ./internal/backend/...'
+	unshare -Urn sh -c 'ip link set lo up && (ip link add d0 type dummy && ip addr add 10.99.0.1/24 dev d0 && ip link set d0 up || true) && PROBER_LEAK_TESTS=1 go test -count=1 ./internal/trace/... ./internal/backend/...'
+
+## test-leak: the engines' leak checks, which run each engine thousands of
+## times and take a while, so they are off unless asked for (the trace
+## engine's needs raw sockets and runs under test-trace instead).
+.PHONY: test-leak
+test-leak:
+	PROBER_LEAK_TESTS=1 go test -count=1 -run 'ReleasesEverything' -v ./internal/sip/
 
 .PHONY: check
 check:

@@ -119,7 +119,7 @@ func New(cfg Config, log *slog.Logger, build BuildInfo) (*Agent, error) {
 		hostname: host,
 		sources:  egressSources(eng.Capabilities()),
 		dns:      dnsClient,
-		jobs:     jobTable{m: map[string]context.CancelFunc{}},
+		jobs:     jobTable{m: map[string]*jobHandle{}},
 	}
 	if dnsClient != nil {
 		log.Info("DNS tool nameservers overridden", "nameservers", dnsClient.Nameservers)
@@ -369,10 +369,11 @@ func (a *Agent) startTrace(ctx context.Context, job *pb.StartJob, send func(*pb.
 	}
 
 	jobCtx, cancel := context.WithCancel(ctx)
-	a.jobs.add(job.JobId, cancel)
+	h := a.jobs.add(job.JobId, cancel)
 
 	go func() {
-		defer a.jobs.remove(job.JobId)
+		defer cancel()
+		defer a.jobs.remove(job.JobId, h)
 		err := a.engine.Run(jobCtx, es, func(ev trace.Event) {
 			je := eventToProto(job.JobId, a.seq.next(), ev)
 			if st := je.GetStarted(); st != nil && st.Source == "" && effSource.IsValid() {
@@ -397,10 +398,11 @@ func (a *Agent) startSip(ctx context.Context, job *pb.StartJob, send func(*pb.Ag
 	}
 
 	jobCtx, cancel := context.WithCancel(ctx)
-	a.jobs.add(job.JobId, cancel)
+	h := a.jobs.add(job.JobId, cancel)
 
 	go func() {
-		defer a.jobs.remove(job.JobId)
+		defer cancel()
+		defer a.jobs.remove(job.JobId, h)
 		es := sipSpecFromProto(spec, resolved)
 		if es.UserAgent == "" {
 			es.UserAgent = "prober/" + a.version
@@ -428,10 +430,11 @@ func (a *Agent) startDns(ctx context.Context, job *pb.StartJob, send func(*pb.Ag
 	spec := dnsSpecFromProto(job.GetDns())
 
 	jobCtx, cancel := context.WithCancel(ctx)
-	a.jobs.add(job.JobId, cancel)
+	h := a.jobs.add(job.JobId, cancel)
 
 	go func() {
-		defer a.jobs.remove(job.JobId)
+		defer cancel()
+		defer a.jobs.remove(job.JobId, h)
 		err := dns.Run(jobCtx, spec, a.dns, func(ev dns.Event) {
 			je := dnsEventToProto(job.JobId, a.seq.next(), ev)
 			_ = send(&pb.AgentMessage{Msg: &pb.AgentMessage_Event{Event: je}})
@@ -551,33 +554,54 @@ func (s *sequence) next() uint64 {
 	return s.n
 }
 
-// jobTable tracks running jobs so Cancel and disconnect can stop them.
+// jobTable tracks running jobs so Cancel and disconnect can stop them. It
+// is bookkeeping only: each job's goroutine owns its context and releases it
+// on exit. That release matters: a job's context is a child of the session's,
+// and a child that is never cancelled stays registered with its parent for
+// the session's whole life, which at hundreds of jobs a minute was a leak of
+// about a kilobyte per job, hundreds of megabytes a day.
 type jobTable struct {
 	mu sync.Mutex
-	m  map[string]context.CancelFunc
+	m  map[string]*jobHandle
 }
 
-func (j *jobTable) add(id string, cancel context.CancelFunc) {
-	j.mu.Lock()
-	j.m[id] = cancel
-	j.mu.Unlock()
+// jobHandle is one running job's entry. remove takes it back, so a job that
+// found its id already taken (a replayed start, an assignment re-applied
+// mid-tick) cannot remove, let alone stop, the job that took it.
+type jobHandle struct {
+	cancel context.CancelFunc
 }
-func (j *jobTable) remove(id string) {
+
+func (j *jobTable) add(id string, cancel context.CancelFunc) *jobHandle {
+	h := &jobHandle{cancel: cancel}
 	j.mu.Lock()
-	delete(j.m, id)
+	j.m[id] = h
 	j.mu.Unlock()
+	return h
 }
-func (j *jobTable) cancel(id string) {
+
+// remove forgets a finished job, if it is still the one registered under
+// the id.
+func (j *jobTable) remove(id string, h *jobHandle) {
 	j.mu.Lock()
-	if c := j.m[id]; c != nil {
-		c()
+	if j.m[id] == h {
+		delete(j.m, id)
 	}
 	j.mu.Unlock()
 }
+
+func (j *jobTable) cancel(id string) {
+	j.mu.Lock()
+	if h := j.m[id]; h != nil {
+		h.cancel()
+	}
+	j.mu.Unlock()
+}
+
 func (j *jobTable) cancelAll() {
 	j.mu.Lock()
-	for _, c := range j.m {
-		c()
+	for _, h := range j.m {
+		h.cancel()
 	}
 	j.mu.Unlock()
 }

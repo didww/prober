@@ -21,7 +21,7 @@ func minimalAgent() *Agent {
 	return &Agent{
 		log:  schedLogger(),
 		cfg:  Config{Limits: Limits{MaxConcurrentJobs: 0}},
-		jobs: jobTable{m: map[string]context.CancelFunc{}},
+		jobs: jobTable{m: map[string]*jobHandle{}},
 	}
 }
 

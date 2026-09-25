@@ -6,22 +6,30 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
 
 // syncBuffer is a bytes.Buffer safe for the library's goroutines to log
-// into while a test reads it.
+// into while a test reads it. A leak test discards while it runs, so it
+// measures the engine's memory and not the log of it.
 type syncBuffer struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
+	mu      sync.Mutex
+	buf     bytes.Buffer
+	discard atomic.Bool
 }
 
 func (b *syncBuffer) Write(p []byte) (int, error) {
+	if b.discard.Load() {
+		return len(p), nil
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.buf.Write(p)
 }
+
+func (b *syncBuffer) SetDiscard(on bool) { b.discard.Store(on) }
 
 func (b *syncBuffer) String() string {
 	b.mu.Lock()

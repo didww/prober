@@ -7,9 +7,14 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/http"
+	"net/http/pprof"
+	"net/netip"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -33,6 +38,7 @@ func run() error {
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	checkConfig := flag.Bool("check-config", false, "validate the configuration and exit")
 	debug := flag.Bool("debug", false, "log at debug level")
+	pprofAddr := flag.String("pprof", "", "serve Go profiling (net/http/pprof) on this address, e.g. 127.0.0.1:6060; off when empty")
 	flag.Parse()
 
 	if *showVersion {
@@ -69,6 +75,26 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	if *pprofAddr != "" {
+		ln, err := listenProfiling(*pprofAddr)
+		if err != nil {
+			return err
+		}
+		log.Info("profiling enabled", "addr", ln.Addr().String())
+		go func() {
+			mux := http.NewServeMux()
+			mux.HandleFunc("/debug/pprof/", pprof.Index)
+			mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+			mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+			mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+			mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+			srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+			if err := srv.Serve(ln); err != nil {
+				log.Warn("profiling server stopped", "err", err)
+			}
+		}()
+	}
+
 	log.Info("prober-agent starting", "version", version, "commit", commit, "site", cfg.Backend.Site)
 	a, err := agent.New(cfg, log, agent.BuildInfo{Version: version, Commit: commit})
 	if err != nil {
@@ -76,4 +102,27 @@ func run() error {
 	}
 	defer a.Close()
 	return a.Run(ctx)
+}
+
+// listenProfiling opens the profiling listener, on a loopback address only:
+// the handlers expose heap and goroutine dumps of a process holding the
+// backend token, so they must not face a network. Binding here rather than
+// in the serving goroutine makes a taken port a startup error, not a warning
+// after "enabled".
+func listenProfiling(addr string) (net.Listener, error) {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, fmt.Errorf("-pprof: %w", err)
+	}
+	if host != "localhost" {
+		ip, err := netip.ParseAddr(host)
+		if err != nil || !ip.IsLoopback() {
+			return nil, fmt.Errorf("-pprof: %q is not a loopback address; profiling must not face a network", addr)
+		}
+	}
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return nil, fmt.Errorf("-pprof: %w", err)
+	}
+	return ln, nil
 }

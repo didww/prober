@@ -18,6 +18,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/netip"
@@ -186,7 +187,7 @@ func Run(ctx context.Context, spec Spec, log *slog.Logger, emit func(Event)) err
 		return err
 	}
 	if log == nil {
-		log = slog.New(slog.NewTextHandler(nil, &slog.HandlerOptions{Level: slog.LevelError}))
+		log = slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
 	}
 	suppressRetransmit()
 

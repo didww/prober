@@ -59,8 +59,9 @@ export function dateTime(iso: string): string {
   })
 }
 
-// A compact human duration from an ISO timestamp to now: "3d 4h", "12m", "45s".
-export function since(iso: string, now = Date.now()): string {
+// A compact human duration from an ISO timestamp to now: "3d 4h", "12m 5s",
+// "45s"; with minutes set, nothing finer than a minute: "12m", "<1m".
+export function since(iso: string, now = Date.now(), minutes = false): string {
   if (!iso) return '—'
   const ms = now - new Date(iso).getTime()
   if (!isFinite(ms) || ms < 0) return '—'
@@ -71,6 +72,7 @@ export function since(iso: string, now = Date.now()): string {
   const sec = s % 60
   if (d > 0) return `${d}d ${h}h`
   if (h > 0) return `${h}h ${m}m`
+  if (minutes) return m > 0 ? `${m}m` : '<1m'
   if (m > 0) return `${m}m ${sec}s`
   return `${sec}s`
 }

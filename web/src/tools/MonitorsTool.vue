@@ -19,8 +19,10 @@ import {
   type ReportRange,
   type TraceReport,
 } from '../api'
-import { dateTime, since } from '../settings'
+import { dateTime } from '../settings'
 import { lossPct } from '../format'
+import SinceText from '../components/SinceText.vue'
+import MonitorRow from '../components/MonitorRow.vue'
 
 // --- the list and its state ---------------------------------------------------
 
@@ -30,7 +32,6 @@ const version = ref(0)
 const loaded = ref(false)
 const loadError = ref('')
 const live = ref(false)
-const now = ref(Date.now())
 // The connected agents, for how many sites a monitor without a site list
 // is expected at.
 const connected = ref<string[]>([])
@@ -188,52 +189,6 @@ const shown = computed(() => {
 
 // --- presentation helpers ----------------------------------------------------------
 
-const STATE_LABEL: Record<MonitorState, string> = { up: 'up', down: 'down', partial: 'partial', nodata: 'no data' }
-
-function sinceText(id: string): string {
-  const at = stateOf(id).since
-  return at ? since(at, now.value) : '—'
-}
-
-// "up / expected" where expected is the configured site list, or every
-// connected agent for a monitor that runs everywhere, so a site that has
-// never reported is not hidden behind a clean "1/1 up".
-function sitesText(m: Monitor, a: MonitorAggregate): string {
-  const expected = Math.max(m.sites.length || connected.value.length, a.sites)
-  if (expected === 0) return '—'
-  const parts = [`${a.up}/${expected} up`]
-  if (a.stale) parts.push(`${a.stale} stale`)
-  if (expected > a.sites) parts.push(`${expected - a.sites} no data`)
-  return parts.join(', ')
-}
-
-function familyLabel(f?: string): string {
-  if (!f) return ''
-  if (f.includes('6')) return 'IPv6'
-  if (f.includes('4')) return 'IPv4'
-  return ''
-}
-
-// How a monitor probes, in one line.
-function params(m: Monitor): string {
-  const p: string[] = []
-  if (m.kind === 'sip') {
-    const s = m.sip
-    p.push((s?.transport || 'udp') + (s?.port ? ':' + s.port : ''))
-    if (familyLabel(s?.family)) p.push(familyLabel(s?.family))
-    if (s?.cycles) p.push(`${s.cycles} cycles`)
-    if (s?.timeout_ms) p.push(`timeout ${s.timeout_ms / 1000}s`)
-  } else {
-    const t = m.trace
-    p.push((t?.protocol || 'icmp') + (t?.port ? ':' + t.port : ''))
-    if (familyLabel(t?.family)) p.push(familyLabel(t?.family))
-    if (t?.cycles) p.push(`${t.cycles} cycles`)
-    if (m.kind === 'trace' && t?.max_ttl) p.push(`max ttl ${t.max_ttl}`)
-  }
-  p.push(`every ${m.interval_s}s`)
-  return p.join(' · ')
-}
-
 function siteClass(s: MonitorSiteStatus): string {
   if (s.up == null) return 'none'
   if (s.stale) return 'stale'
@@ -338,7 +293,6 @@ async function loadHistory(id: string) {
 }
 
 let poll = 0
-let tick = 0
 let probers = 0
 onMounted(() => {
   void load()
@@ -350,12 +304,10 @@ onMounted(() => {
     for (const [id, d] of Object.entries(details)) if (d.open) void refreshDetail(id)
   }, 5000)
   probers = window.setInterval(loadProbers, 60000)
-  tick = window.setInterval(() => (now.value = Date.now()), 1000)
 })
 onBeforeUnmount(() => {
   clearInterval(poll)
   clearInterval(probers)
-  clearInterval(tick)
   clearTimeout(retry)
   clearTimeout(reconnect)
   es?.close()
@@ -414,18 +366,7 @@ onBeforeUnmount(() => {
       </thead>
       <tbody>
         <template v-for="m in shown" :key="m.id">
-          <tr class="row" :class="{ open: details[m.id]?.open }" tabindex="0" :aria-expanded="!!details[m.id]?.open" @click="toggle(m)" @keydown.enter.prevent="toggle(m)" @keydown.space.prevent="toggle(m)">
-            <td><span class="st" :class="stateOf(m.id).state">{{ STATE_LABEL[stateOf(m.id).state] }}</span></td>
-            <td class="mono small">{{ sitesText(m, stateOf(m.id)) }}</td>
-            <td><span class="kind" :class="m.kind">{{ m.kind }}</span></td>
-            <td class="id"><span class="caret" :class="{ open: details[m.id]?.open }">▶</span>{{ m.id }}</td>
-            <td class="mono">{{ m.target }}</td>
-            <td class="dim small">{{ params(m) }}</td>
-            <td class="labels">
-              <span v-for="(v, k) in m.labels" :key="k" class="label">{{ k }}=<b>{{ v }}</b></span>
-            </td>
-            <td class="r mono dim small">{{ sinceText(m.id) }}</td>
-          </tr>
+          <MonitorRow :m="m" :agg="stateOf(m.id)" :agents="connected.length" :open="!!details[m.id]?.open" @toggle="toggle(m)" />
 
           <tr v-if="details[m.id]?.open" class="detail-row">
             <td colspan="8">
@@ -471,7 +412,7 @@ onBeforeUnmount(() => {
                       <td class="r mono" :class="{ warnloss: s.up != null && m.kind !== 'sip' && s.loss_pct > 0 }">{{ lossText(m, s) }}</td>
                       <td class="r mono">{{ s.rtt_ms != null ? s.rtt_ms.toFixed(1) + ' ms' : '—' }}</td>
                       <td :class="{ bad: s.error }">{{ siteDetail(m, s) }}</td>
-                      <td class="r mono dim">{{ s.at ? since(s.at, now) + ' ago' : '—' }}</td>
+                      <td class="r mono dim"><SinceText :at="s.at" suffix=" ago" /></td>
                     </tr>
                     <tr v-if="!details[m.id].loading && details[m.id].status.length === 0">
                       <td colspan="7" class="dim">No site runs this monitor: no agent is connected.</td>
@@ -564,30 +505,16 @@ h1 { font-size: 16px; margin: 0; }
 
 .grid { width: 100%; border-collapse: collapse; font-size: 13px; }
 .grid th { text-align: left; color: var(--fg-dim); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; padding: 6px 10px; border-bottom: 1px solid var(--line); }
-.grid td { padding: 6px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
-.grid th.r, .grid td.r { text-align: right; }
-.row { cursor: pointer; }
-.row:hover { background: var(--hover); }
-.row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.row.open td { border-bottom: 0; }
-.id { font-weight: 600; white-space: nowrap; }
+/* :deep, as the rows are MonitorRow's. */
+.grid :deep(td) { padding: 6px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.grid th.r, .grid :deep(td.r) { text-align: right; }
 .caret { display: inline-block; margin-right: 6px; font-size: 9px; color: var(--fg-dim); transition: transform 0.1s; }
 .caret.open { transform: rotate(90deg); }
-/* Solid badges take the cell palette, which is made for light text on it in
-   both themes; the semantic text colours are tuned for text on the panel and
-   go too bright in dark mode. */
-.kind { padding: 1px 7px; border-radius: 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--cell-fg); background: var(--fg-dim); }
-.kind.trace { background: var(--accent-solid, var(--accent)); }
-.kind.ping { background: var(--cell-good); }
-.kind.sip { background: var(--cell-warn); }
-.labels { display: flex; flex-wrap: wrap; gap: 4px; }
-.label { padding: 1px 7px; border: 1px solid var(--line); border-radius: 999px; font-size: 11px; color: var(--fg-dim); white-space: nowrap; }
-.label b { color: var(--fg); font-weight: 500; }
 .st { display: inline-block; min-width: 52px; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; text-align: center; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; }
-.st.up, .st.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
-.st.down, .st.bad { color: var(--bad); background: color-mix(in srgb, var(--bad) 14%, transparent); }
-.st.partial, .st.stale { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
-.st.nodata, .st.none { color: var(--fg-dim); background: var(--hover); }
+.st.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+.st.bad { color: var(--bad); background: color-mix(in srgb, var(--bad) 14%, transparent); }
+.st.stale { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
+.st.none { color: var(--fg-dim); background: var(--hover); }
 
 .detail-row td { padding: 0 10px 10px 34px; background: var(--panel); }
 .detail { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }

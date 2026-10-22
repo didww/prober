@@ -30,6 +30,13 @@ const sitesText = computed(() => {
   return parts.join(', ')
 })
 
+// The labels cell shows what fits on one line; the tooltip has them all.
+const labelsTitle = computed(() =>
+  Object.entries(props.m.labels)
+    .map(([k, v]) => `${k}=${v}`)
+    .join('\n'),
+)
+
 function familyLabel(f?: string): string {
   if (!f) return ''
   if (f.includes('6')) return 'IPv6'
@@ -68,7 +75,9 @@ const params = computed(() => {
     <td class="mono">{{ m.target }}</td>
     <td class="dim small">{{ params }}</td>
     <td class="labels">
-      <span v-for="(v, k) in m.labels" :key="k" class="label">{{ k }}=<b>{{ v }}</b></span>
+      <div class="chips" :title="labelsTitle">
+        <span v-for="(v, k) in m.labels" :key="k" class="label">{{ k }}=<b>{{ v }}</b></span>
+      </div>
     </td>
     <td class="r mono dim small"><SinceText :at="agg.since" minutes /></td>
   </tr>
@@ -82,6 +91,9 @@ const params = computed(() => {
 .row:hover { background: var(--hover); }
 .row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .row.open td { border-bottom: 0; }
+/* Every row is one line high, so a row leaving or joining the list above
+   the viewport never shifts what is below by the difference in heights. */
+.row td { white-space: nowrap; }
 .id { font-weight: 600; white-space: nowrap; }
 .caret { display: inline-block; margin-right: 6px; font-size: 9px; color: var(--fg-dim); transition: transform 0.1s; }
 .caret.open { transform: rotate(90deg); }
@@ -92,7 +104,10 @@ const params = computed(() => {
 .kind.trace { background: var(--accent-solid, var(--accent)); }
 .kind.ping { background: var(--cell-good); }
 .kind.sip { background: var(--cell-warn); }
-.labels { display: flex; flex-wrap: wrap; gap: 4px; }
+/* The labels column takes the width the others leave (max-width: 0 keeps
+   its chips from widening the table) and clips what does not fit. */
+.labels { width: 100%; max-width: 0; }
+.chips { display: flex; gap: 4px; overflow: hidden; }
 .label { padding: 1px 7px; border: 1px solid var(--line); border-radius: 999px; font-size: 11px; color: var(--fg-dim); white-space: nowrap; }
 .label b { color: var(--fg); font-weight: 500; }
 .st { display: inline-block; min-width: 52px; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; text-align: center; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; }
